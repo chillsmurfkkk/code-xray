@@ -67,3 +67,9 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Local IDE settings
+.vs/
+.idea/
+cmake-build-*/
+CMakeUserPresets.json

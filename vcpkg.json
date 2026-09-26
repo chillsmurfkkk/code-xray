@@ -1,0 +1,12 @@
+{
+  "name": "code-xray",
+  "version-string": "0.0.1",
+  "builtin-baseline": "776a31fc8d3659de2c9cca4364062be5bbdf3857",
+  "dependencies": [
+    { "name": "qtbase", "default-features": false, "features": ["widgets", "windeployqt"] },
+    "tree-sitter",
+    { "name": "libgit2", "default-features": false, "features": ["pcre2"] },
+    "nlohmann-json",
+    "inja"
+  ]
+}
