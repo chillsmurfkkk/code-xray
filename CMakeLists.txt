@@ -17,20 +17,28 @@ target_compile_features(xray_common INTERFACE cxx_std_20)
 if(MSVC)
     target_compile_options(xray_common INTERFACE /W4 /permissive- /utf-8)
 endif()
+
 add_library(xray_code INTERFACE)
 target_link_libraries(xray_code INTERFACE xray_common)
+
 add_library(xray_analysis INTERFACE)
 target_link_libraries(xray_analysis INTERFACE xray_code)
+
 add_library(xray_history INTERFACE)
 target_link_libraries(xray_history INTERFACE xray_code)
+
 add_library(xray_review INTERFACE)
 target_link_libraries(xray_review INTERFACE xray_analysis)
 
 if(BUILD_TESTING)
+    add_executable(history_test tests/history_test.cpp)
+    target_link_libraries(history_test PRIVATE xray_history)
+    add_test(NAME history_test COMMAND history_test)
+
     add_executable(contract_tests tests/contracts.cpp)
     target_link_libraries(contract_tests PRIVATE xray_history xray_review)
     add_test(NAME contracts COMMAND contract_tests)
-    # Each public header must compile without another header included first.
+
     set(contract_headers
         common/job.hpp common/result.hpp
         code/types.hpp code/api.hpp
@@ -47,11 +55,9 @@ endif()
 
 if(CODE_XRAY_BUILD_APP)
     include(cmake/Dependencies.cmake)
-    qt_add_executable(code-xray WIN32 src/app/main.cpp)
+    qt_add_executable(code-xray src/app/main.cpp)
     target_link_libraries(code-xray PRIVATE Qt6::Widgets xray_history xray_review)
-    add_custom_command(TARGET code-xray POST_BUILD
-        COMMAND "$<TARGET_FILE:Qt6::windeployqt>" --no-translations --no-compiler-runtime "$<TARGET_FILE:code-xray>"
-        VERBATIM)
+
     if(BUILD_TESTING)
         add_executable(dependency_smoke tests/dependencies.cpp)
         target_link_libraries(dependency_smoke PRIVATE xray_common xray_cpp_grammar
