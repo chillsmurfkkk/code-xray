@@ -7,10 +7,8 @@
 
 namespace xray::history {
 
-
     Result<HistoryResult> query(const RepositorySpec& spec,
-        const HistoryQuery& querySpec,
-        const RevisionSelection& selection,
+        const HistoryRequest& request,
         const JobContext& ctx);
 
     Result<code::SourceSnapshot> loadSnapshot(const RepositorySpec& spec,

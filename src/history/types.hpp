@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <unordered_map>
 
 namespace xray::history {
 
@@ -52,6 +53,13 @@ namespace xray::history {
     public:
         virtual ~HistoryQuery() = default;
         [[nodiscard]] virtual std::vector<CommitRecord> apply(const std::vector<CommitRecord>& commits) const = 0;
+    };
+
+    struct HistoryRequest {
+        Oid startOid;
+        std::size_t limit = 20;
+        std::optional<std::string> relativePath;
+        std::size_t parentIndex = 0;
     };
 
     class CommitRangeQuery : public HistoryQuery {
@@ -150,15 +158,22 @@ namespace xray::history {
         std::vector<std::vector<T>> groups;
         if (records.empty()) return groups;
 
-        std::vector<T> currentGroup;
+        using KeyType = decltype(keyExtractor(records.front()));
+        std::unordered_map<KeyType, std::vector<T>> mapGroups;
+        std::vector<KeyType> order;
+
         for (const auto& item : records) {
-            if (!currentGroup.empty() && keyExtractor(currentGroup.back()) != keyExtractor(item)) {
-                groups.push_back(currentGroup);
-                currentGroup.clear();
+            KeyType key = keyExtractor(item);
+            if (mapGroups.find(key) == mapGroups.end()) {
+                order.push_back(key);
             }
-            currentGroup.push_back(item);
+            mapGroups[key].push_back(item);
         }
-        if (!currentGroup.empty()) groups.push_back(currentGroup);
+
+        for (const auto& key : order) {
+            groups.push_back(std::move(mapGroups[key]));
+        }
+
         return groups;
     }
 
