@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 namespace xray::history {
 
@@ -14,20 +15,13 @@ namespace xray::history {
 
     struct RepositorySpec { std::filesystem::path path; };
 
-    struct HistoryRequest {
-        Oid startOid;
-        std::size_t limit = 20;
-        std::optional<std::string> relativePath;
-        std::size_t parentIndex = 0;
-    };
-
     struct CommitRecord {
         Oid oid;
         std::vector<Oid> parentOids;
         std::string authorName;
         std::string authorEmail;
-        std::chrono::sys_seconds authoredAt;
-        std::chrono::sys_seconds committedAt;
+        std::chrono::sys_seconds authoredAt{};
+        std::chrono::sys_seconds committedAt{};
         std::string message;
     };
 
@@ -54,38 +48,118 @@ namespace xray::history {
         Coverage coverage;
     };
 
-    class HistoryFilter {
+    class HistoryQuery {
     public:
-        virtual ~HistoryFilter() = default;
-        [[nodiscard]] virtual bool matches(const CommitRecord& commit) const = 0;
+        virtual ~HistoryQuery() = default;
+        [[nodiscard]] virtual std::vector<CommitRecord> apply(const std::vector<CommitRecord>& commits) const = 0;
     };
 
-    class AuthorFilter : public HistoryFilter {
+    class CommitRangeQuery : public HistoryQuery {
     private:
-        std::string author;
+        Oid startOid;
+        Oid endOid;
     public:
-        explicit AuthorFilter(std::string a) : author(std::move(a)) {}
-        [[nodiscard]] bool matches(const CommitRecord& commit) const override {
-            return commit.authorName.find(author) != std::string::npos;
+        CommitRangeQuery(Oid start, Oid end) : startOid(std::move(start)), endOid(std::move(end)) {}
+
+        [[nodiscard]] std::vector<CommitRecord> apply(const std::vector<CommitRecord>& commits) const override {
+            std::vector<CommitRecord> result;
+            bool insideRange = false;
+            for (const auto& c : commits) {
+                if (c.oid == startOid || startOid.empty()) insideRange = true;
+                if (insideRange) result.push_back(c);
+                if (!endOid.empty() && c.oid == endOid) break;
+            }
+            return result;
         }
     };
 
-    class RevisionSelector {
+    class FileHistoryQuery : public HistoryQuery {
+    private:
+        std::string filePath;
+        std::vector<ChangeRecord> allChanges;
     public:
-        virtual ~RevisionSelector() = default;
+        FileHistoryQuery(std::string path, std::vector<ChangeRecord> changes)
+            : filePath(std::move(path)), allChanges(std::move(changes)) {
+        }
+
+        [[nodiscard]] std::vector<CommitRecord> apply(const std::vector<CommitRecord>& commits) const override {
+            std::vector<CommitRecord> result;
+            for (const auto& c : commits) {
+                bool touchedFile = std::any_of(allChanges.begin(), allChanges.end(), [&](const ChangeRecord& ch) {
+                    return ch.commitOid == c.oid &&
+                        ((ch.newPath && *ch.newPath == filePath) || (ch.oldPath && *ch.oldPath == filePath));
+                    });
+                if (touchedFile) result.push_back(c);
+            }
+            return result;
+        }
+    };
+
+    class RevisionSelection {
+    public:
+        virtual ~RevisionSelection() = default;
         [[nodiscard]] virtual std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const = 0;
     };
 
-    class LimitSelector : public RevisionSelector {
+    class LastNSelection : public RevisionSelection {
     private:
-        std::size_t limit;
+        std::size_t count;
     public:
-        explicit LimitSelector(std::size_t n) : limit(n) {}
+        explicit LastNSelection(std::size_t n) : count(n) {}
 
         [[nodiscard]] std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const override {
-            if (commits.size() <= limit) return commits;
-            return std::vector<CommitRecord>(commits.begin(), commits.begin() + limit);
+            if (commits.size() <= count) return commits;
+            return std::vector<CommitRecord>(commits.begin(), commits.begin() + count);
         }
     };
+
+    class ExplicitSelection : public RevisionSelection {
+    private:
+        std::vector<Oid> targetOids;
+    public:
+        explicit ExplicitSelection(std::vector<Oid> oids) : targetOids(std::move(oids)) {}
+
+        [[nodiscard]] std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const override {
+            std::vector<CommitRecord> result;
+            for (const auto& c : commits) {
+                if (std::find(targetOids.begin(), targetOids.end(), c.oid) != targetOids.end()) {
+                    result.push_back(c);
+                }
+            }
+            return result;
+        }
+    };
+
+    class PeriodicSelection : public RevisionSelection {
+    private:
+        std::size_t step;
+    public:
+        explicit PeriodicSelection(std::size_t s) : step(s == 0 ? 1 : s) {}
+
+        [[nodiscard]] std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const override {
+            std::vector<CommitRecord> result;
+            for (std::size_t i = 0; i < commits.size(); i += step) {
+                result.push_back(commits[i]);
+            }
+            return result;
+        }
+    };
+
+    template<typename T, typename KeyExtractor>
+    std::vector<std::vector<T>> groupRecords(const std::vector<T>& records, KeyExtractor keyExtractor) {
+        std::vector<std::vector<T>> groups;
+        if (records.empty()) return groups;
+
+        std::vector<T> currentGroup;
+        for (const auto& item : records) {
+            if (!currentGroup.empty() && keyExtractor(currentGroup.back()) != keyExtractor(item)) {
+                groups.push_back(currentGroup);
+                currentGroup.clear();
+            }
+            currentGroup.push_back(item);
+        }
+        if (!currentGroup.empty()) groups.push_back(currentGroup);
+        return groups;
+    }
 
 } // namespace xray::history
