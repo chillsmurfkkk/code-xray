@@ -2,6 +2,7 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <cassert>
 
 int main() {
     using namespace xray::history;
@@ -20,38 +21,34 @@ int main() {
         {"oid4", "oid3", "src/analysis/api.hpp", "src/analysis/api.hpp", ChangeStatus::modified, 30, 0}
     };
 
-    std::cout << "--- Testing HistoryQuery Hierarchy ---\n";
-
     std::unique_ptr<HistoryQuery> rangeQuery = std::make_unique<CommitRangeQuery>("oid2", "oid4");
     auto rangeResults = rangeQuery->apply(mockCommits);
-    std::cout << "[CommitRangeQuery] Matched commits count (oid2..oid4): " << rangeResults.size() << "\n";
+    assert(rangeResults.size() == 3 && "CommitRangeQuery failed");
 
     std::unique_ptr<HistoryQuery> fileQuery = std::make_unique<FileHistoryQuery>("src/history/api.hpp", mockChanges);
     auto fileResults = fileQuery->apply(mockCommits);
-    std::cout << "[FileHistoryQuery] Matched commits touching 'src/history/api.hpp': " << fileResults.size() << "\n\n";
+    assert(fileResults.size() == 1 && "FileHistoryQuery failed");
 
-    std::cout << "--- Testing RevisionSelection Strategies ---\n";
+    LastNSelection last2(2);
+    assert(last2.select(mockCommits).size() == 2 && "LastNSelection failed");
 
-    std::vector<std::unique_ptr<RevisionSelection>> strategies;
-    strategies.push_back(std::make_unique<LastNSelection>(2));
-    strategies.push_back(std::make_unique<ExplicitSelection>(std::vector<Oid>{"oid1", "oid3"}));
-    strategies.push_back(std::make_unique<PeriodicSelection>(2));
+    ExplicitSelection explicitSel(std::vector<Oid>{"oid1", "oid3"});
+    assert(explicitSel.select(mockCommits).size() == 2 && "ExplicitSelection failed");
 
-    for (std::size_t i = 0; i < strategies.size(); ++i) {
-        auto selected = strategies[i]->select(mockCommits);
-        std::cout << "Strategy #" << (i + 1) << " selected commits count: " << selected.size() << "\n";
-    }
-    std::cout << "\n";
-
-    // 4. Тест шаблонного groupRecords
-    std::cout << "--- Testing groupRecords Template ---\n";
+    PeriodicSelection periodicSel(2);
+    assert(periodicSel.select(mockCommits).size() == 2 && "PeriodicSelection failed");
 
     auto groupedByAuthor = groupRecords(mockCommits, [](const CommitRecord& c) {
         return c.authorName;
         });
-    std::cout << "Grouped commit blocks by author count: " << groupedByAuthor.size() << "\n";
+    assert(groupedByAuthor.size() == 3 && "groupRecords for commits failed: expected 3 unique authors");
+    assert(groupedByAuthor[0].size() == 2 && "Author 'test2' should have 2 commits");
 
-    std::cout << "\n=== All tests completed successfully! ===\n";
+    auto groupedByStatus = groupRecords(mockChanges, [](const ChangeRecord& ch) {
+        return ch.status;
+        });
+    assert(groupedByStatus.size() == 2 && "groupRecords for changes failed: expected 2 status groups (added, modified)");
 
+    std::cout << "All history module assertion tests passed successfully!\n";
     return 0;
 }

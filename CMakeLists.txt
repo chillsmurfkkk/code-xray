@@ -4,6 +4,7 @@ project(CodeXray VERSION 0.0.1 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
 if(NOT WIN32 OR NOT MSVC OR NOT CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
     message(FATAL_ERROR "E0 supports Windows x64 with MSVC only; use the documented presets.")
 endif()
@@ -14,6 +15,7 @@ include(CTest)
 add_library(xray_common INTERFACE)
 target_include_directories(xray_common INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(xray_common INTERFACE cxx_std_20)
+
 if(MSVC)
     target_compile_options(xray_common INTERFACE /W4 /permissive- /utf-8)
 endif()
@@ -55,8 +57,15 @@ endif()
 
 if(CODE_XRAY_BUILD_APP)
     include(cmake/Dependencies.cmake)
-    qt_add_executable(code-xray src/app/main.cpp)
+    
+    # Відновлено WIN32
+    qt_add_executable(code-xray WIN32 src/app/main.cpp)
     target_link_libraries(code-xray PRIVATE Qt6::Widgets xray_history xray_review)
+
+    # Відновлено POST_BUILD для windeployqt
+    add_custom_command(TARGET code-xray POST_BUILD
+        COMMAND "$<TARGET_FILE:Qt6::windeployqt>" --no-translations --no-compiler-runtime "$<TARGET_FILE:code-xray>"
+        VERBATIM)
 
     if(BUILD_TESTING)
         add_executable(dependency_smoke tests/dependencies.cpp)
