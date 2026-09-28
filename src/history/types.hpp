@@ -1,7 +1,5 @@
 #pragma once
 
-#include "code/types.hpp"
-
 #include <chrono>
 #include <filesystem>
 #include <optional>
@@ -9,12 +7,20 @@
 #include <vector>
 #include <algorithm>
 #include <unordered_map>
+#include "common/job.hpp"
 
 namespace xray::history {
 
     using Oid = std::string;
 
     struct RepositorySpec { std::filesystem::path path; };
+
+    struct HistoryRequest {
+        Oid startOid;
+        std::size_t limit = 20;
+        std::optional<std::string> relativePath;
+        std::size_t parentIndex = 0;
+    };
 
     struct CommitRecord {
         Oid oid;
@@ -42,24 +48,21 @@ namespace xray::history {
         std::optional<std::string> patch;
     };
 
+    struct Coverage {
+        std::unordered_map<std::string, std::vector<int>> lineCoverage;
+    };
+
     struct HistoryResult {
         std::vector<CommitRecord> commits;
         std::vector<ChangeRecord> changes;
         bool hasMore = false;
-        Coverage coverage;
+        Coverage coverage{};
     };
 
     class HistoryQuery {
     public:
         virtual ~HistoryQuery() = default;
         [[nodiscard]] virtual std::vector<CommitRecord> apply(const std::vector<CommitRecord>& commits) const = 0;
-    };
-
-    struct HistoryRequest {
-        Oid startOid;
-        std::size_t limit = 20;
-        std::optional<std::string> relativePath;
-        std::size_t parentIndex = 0;
     };
 
     class CommitRangeQuery : public HistoryQuery {
@@ -71,11 +74,32 @@ namespace xray::history {
 
         [[nodiscard]] std::vector<CommitRecord> apply(const std::vector<CommitRecord>& commits) const override {
             std::vector<CommitRecord> result;
-            bool insideRange = false;
+
+            bool startFound = startOid.empty() || std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == startOid; });
+            bool endFound = endOid.empty() || std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == endOid; });
+
+            if (!startFound && !endFound) {
+                return {};
+            }
+
+            bool insideRange = startOid.empty();
+
             for (const auto& c : commits) {
-                if (c.oid == startOid || startOid.empty()) insideRange = true;
-                if (insideRange) result.push_back(c);
-                if (!endOid.empty() && c.oid == endOid) break;
+                if (!startOid.empty() && c.oid == startOid) {
+                    insideRange = true;
+                }
+
+                if (insideRange) {
+                    result.push_back(c);
+                }
+
+                if (!endOid.empty() && c.oid == endOid) {
+                    if (!insideRange) {
+                        result.clear();
+                        result.push_back(c);
+                    }
+                    break;
+                }
             }
             return result;
         }
@@ -124,7 +148,7 @@ namespace xray::history {
     class ExplicitSelection : public RevisionSelection {
     private:
         std::vector<Oid> targetOids;
-    public:
+    public: // Виправлено доступ (було pub:)
         explicit ExplicitSelection(std::vector<Oid> oids) : targetOids(std::move(oids)) {}
 
         [[nodiscard]] std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const override {
@@ -146,7 +170,8 @@ namespace xray::history {
 
         [[nodiscard]] std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const override {
             std::vector<CommitRecord> result;
-            for (std::size_t i = 0; i < commits.size(); i += step) {
+            std::size_t effectiveStep = (step == 0) ? 1 : step;
+            for (std::size_t i = 0; i < commits.size(); i += effectiveStep) {
                 result.push_back(commits[i]);
             }
             return result;
