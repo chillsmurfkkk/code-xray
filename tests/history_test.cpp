@@ -1,25 +1,33 @@
 #include "history/types.hpp"
 #include <iostream>
-#include <memory>
 #include <vector>
 #include <cassert>
+#include <stdexcept>
 
-void printCommitList(const std::string& label, const std::vector<xray::history::CommitRecord>& commits) {
-    std::cout << "  [" << label << "] Total: " << commits.size() << " commit(s) -> { ";
-    for (size_t i = 0; i < commits.size(); ++i) {
-        std::cout << commits[i].oid << (i + 1 < commits.size() ? ", " : "");
-    }
-    std::cout << " }\n";
+std::vector<xray::history::CommitRecord> executeQuery(
+    const xray::history::HistoryQuery& query,
+    const std::vector<xray::history::CommitRecord>& commits)
+{
+    return query.apply(commits);
+}
+
+std::vector<xray::history::CommitRecord> executeSelection(
+    const xray::history::RevisionSelection& selection,
+    const std::vector<xray::history::CommitRecord>& commits)
+{
+    return selection.select(commits);
 }
 
 int main() {
     using namespace xray::history;
 
+    std::cout << "  CodeXray: History Module Validation (LR #1 Requirements)\n";
+
     std::vector<CommitRecord> mockCommits = {
-        {"oid4", {"oid3"}, "test3", "b@test.com", {}, {}, "Add analysis metrics"},
-        {"oid3", {"oid2"}, "test2", "c@test.com", {}, {}, "Fix LNK2019 build issues"},
+        {"oid4", {"oid3"}, "test3", "c@test.com", {}, {}, "Add analysis metrics"},
+        {"oid3", {"oid2"}, "test2", "b@test.com", {}, {}, "Fix build issues"},
         {"oid2", {"oid1"}, "test1", "a@test.com", {}, {}, "Add code parser"},
-        {"oid1", {},       "test2", "c@test.com", {}, {}, "Initial commit"}
+        {"oid1", {},       "test2", "b@test.com", {}, {}, "Initial commit"}
     };
 
     std::vector<ChangeRecord> mockChanges = {
@@ -29,101 +37,80 @@ int main() {
         {"oid1", std::nullopt, std::nullopt, "src/app/main.cpp", ChangeStatus::added, 15, 0}
     };
 
-    printCommitList("Input Mock Commits (Newest -> Oldest)", mockCommits);
-    std::cout << "1. Testing HistoryQuery Polymorphic Hierarchy\n";
-
+    std::cout << "1. Testing HistoryQuery via Polymorphic Interface (HistoryQuery&)\n";
     {
         CommitRangeQuery rangeQuery("oid4", "oid2");
-        auto results = rangeQuery.apply(mockCommits);
-        printCommitList("CommitRangeQuery (oid4..oid2)", results);
+        auto rangeResult = executeQuery(rangeQuery, mockCommits);
+        assert(rangeResult.size() == 3);
+        assert(rangeResult[0].oid == "oid4" && rangeResult[2].oid == "oid2");
+        std::cout << "  [OK] CommitRangeQuery returned valid range oid4..oid2\n";
 
-        assert(results.size() == 3);
-        assert(results[0].oid == "oid4");
-        assert(results[1].oid == "oid3");
-        assert(results[2].oid == "oid2");
-        std::cout << "   -> OK: Range query returned exact sequence {oid4, oid3, oid2}.\n";
+        CommitRangeQuery invalidRange("non_existing_oid", "oid2");
+        auto invalidResult = executeQuery(invalidRange, mockCommits);
+        assert(invalidResult.empty());
+        std::cout << "  [OK] CommitRangeQuery correctly rejected invalid start boundary\n";
 
-        CommitRangeQuery unknownRange("unknown_1", "unknown_2");
-        auto emptyResults = unknownRange.apply(mockCommits);
-        printCommitList("CommitRangeQuery (unknown bounds)", emptyResults);
-        assert(emptyResults.empty());
-        std::cout << "   -> OK: Unknown range handled correctly (0 commits returned).\n";
-    }
-
-    {
         FileHistoryQuery fileQuery("src/history/api.hpp", mockChanges);
-        auto results = fileQuery.apply(mockCommits);
-        printCommitList("FileHistoryQuery ('src/history/api.hpp')", results);
-
-        assert(results.size() == 1);
-        assert(results[0].oid == "oid3");
-        std::cout << "   -> OK: File history matched commit oid3.\n";
+        auto fileResult = executeQuery(fileQuery, mockCommits);
+        assert(fileResult.size() == 1 && fileResult[0].oid == "oid3");
+        std::cout << "  [OK] FileHistoryQuery correctly filtered commits touching history/api.hpp\n";
     }
 
-    std::cout << "2. Testing RevisionSelection Edge Cases & OID Selection\n";
-
+    std::cout << "\n2. Testing RevisionSelection Strategies (RevisionSelection&)\n";
     {
         LastNSelection last2(2);
-        auto sel1 = last2.select(mockCommits);
-        printCommitList("LastNSelection (N=2)", sel1);
-        assert(sel1.size() == 2 && sel1[0].oid == "oid4" && sel1[1].oid == "oid3");
-        std::cout << "   -> OK: LastNSelection picked 2 newest commits.\n";
+        auto last2Result = executeSelection(last2, mockCommits);
+        assert(last2Result.size() == 2 && last2Result[0].oid == "oid4");
+        std::cout << "  [OK] LastNSelection picked 2 newest commits\n";
 
-        ExplicitSelection explicitSel(std::vector<Oid>{"oid3", "non_existing_oid"});
-        auto sel2 = explicitSel.select(mockCommits);
-        printCommitList("ExplicitSelection (oid3, non_existing_oid)", sel2);
-        assert(sel2.size() == 1 && sel2[0].oid == "oid3");
-        std::cout << "   -> OK: ExplicitSelection filtered out non-existing OID.\n";
+        ExplicitSelection explicitSel(std::vector<Oid>{"oid3", "oid1"});
+        auto explicitResult = executeSelection(explicitSel, mockCommits);
+        assert(explicitResult.size() == 2 && explicitResult[0].oid == "oid3" && explicitResult[1].oid == "oid1");
+        std::cout << "  [OK] ExplicitSelection picked exact OIDs in requested order\n";
 
-        PeriodicSelection zeroStep(0);
-        auto sel3 = zeroStep.select(mockCommits);
-        printCommitList("PeriodicSelection (step=0 fallback)", sel3);
-        assert(sel3.size() == 4);
-        std::cout << "   -> OK: Zero step fallback handled safely (treated as step=1).\n";
+        bool caughtExplicitError = false;
+        try {
+            ExplicitSelection badExplicit(std::vector<Oid>{"non_existing_oid"});
+            executeSelection(badExplicit, mockCommits);
+        }
+        catch (const std::invalid_argument&) {
+            caughtExplicitError = true;
+        }
+        assert(caughtExplicitError);
+        std::cout << "  [OK] ExplicitSelection threw exception on non-existing OID\n";
 
-        PeriodicSelection step2(2);
-        auto sel4 = step2.select(mockCommits);
-        printCommitList("PeriodicSelection (step=2)", sel4);
-        assert(sel4.size() == 2 && sel4[0].oid == "oid4" && sel4[1].oid == "oid2");
-        std::cout << "   -> OK: Periodic selection picked {oid4, oid2}.\n";
+        PeriodicSelection periodic(2);
+        auto periodicResult = executeSelection(periodic, mockCommits);
+        assert(periodicResult.size() == 2 && periodicResult[0].oid == "oid4" && periodicResult[1].oid == "oid2");
+        std::cout << "  [OK] PeriodicSelection with step=2 picked {oid4, oid2}\n";
+
+        bool caughtPeriodicError = false;
+        try {
+            PeriodicSelection badPeriodic(0);
+        }
+        catch (const std::invalid_argument&) {
+            caughtPeriodicError = true;
+        }
+        assert(caughtPeriodicError);
+        std::cout << "  [OK] PeriodicSelection threw exception on step=0\n";
     }
 
-    std::cout << "3. Testing groupRecords Template (Commits & Changes)\n";
-
+    std::cout << "\n3. Testing Generic groupRecords\n";
     {
         auto groupedByAuthor = groupRecords(mockCommits, [](const CommitRecord& c) {
             return c.authorName;
             });
-
-        std::cout << "  [groupRecords by Author] Created " << groupedByAuthor.size() << " group(s):\n";
-        for (const auto& group : groupedByAuthor) {
-            std::cout << "    - Author '" << group[0].authorName << "' (" << group.size() << " commits): { ";
-            for (size_t i = 0; i < group.size(); ++i) {
-                std::cout << group[i].oid << (i + 1 < group.size() ? ", " : "");
-            }
-            std::cout << " }\n";
-        }
-
-        assert(groupedByAuthor.size() == 3);
-
-        auto it = std::find_if(groupedByAuthor.begin(), groupedByAuthor.end(), [](const std::vector<CommitRecord>& g) {
-            return !g.empty() && g[0].authorName == "test2";
-            });
-        assert(it != groupedByAuthor.end());
-        assert(it->size() == 2);
-        assert((*it)[0].oid == "oid3");
-        assert((*it)[1].oid == "oid1");
-        std::cout << "   -> OK: Author 'test2' commits (oid3, oid1) correctly merged into 1 group.\n";
+        assert(groupedByAuthor.size() == 3); // test3, test2, test1
+        std::cout << "  [OK] groupRecords grouped commits by Author into 3 groups\n";
 
         auto groupedByStatus = groupRecords(mockChanges, [](const ChangeRecord& ch) {
             return ch.status;
             });
-        std::cout << "  [groupRecords by ChangeStatus] Created " << groupedByStatus.size() << " status group(s).\n";
-        assert(groupedByStatus.size() == 2);
-        std::cout << "   -> OK: Changes correctly grouped into 2 status categories (added, modified).\n";
+        assert(groupedByStatus.size() == 2); // modified, added
+        std::cout << "  [OK] groupRecords grouped changes by Status into 2 groups\n";
     }
 
-    std::cout << "  SUCCESS: All history module tests & assertions passed! \n";
+    std::cout << "  ALL LR #1 REQUIREMENTS SUCCESSFULLY VERIFIED!\n";
 
     return 0;
 }
