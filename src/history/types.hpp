@@ -7,7 +7,10 @@
 #include <vector>
 #include <algorithm>
 #include <unordered_map>
+#include <stdexcept>
+
 #include "common/job.hpp"
+#include "code/types.hpp"
 
 namespace xray::history {
 
@@ -48,15 +51,11 @@ namespace xray::history {
         std::optional<std::string> patch;
     };
 
-    struct Coverage {
-        std::unordered_map<std::string, std::vector<int>> lineCoverage;
-    };
-
     struct HistoryResult {
         std::vector<CommitRecord> commits;
         std::vector<ChangeRecord> changes;
         bool hasMore = false;
-        Coverage coverage{};
+        xray::Coverage coverage{};
     };
 
     class HistoryQuery {
@@ -73,15 +72,16 @@ namespace xray::history {
         CommitRangeQuery(Oid start, Oid end) : startOid(std::move(start)), endOid(std::move(end)) {}
 
         [[nodiscard]] std::vector<CommitRecord> apply(const std::vector<CommitRecord>& commits) const override {
-            std::vector<CommitRecord> result;
+            if (commits.empty()) return {};
 
-            bool startFound = startOid.empty() || std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == startOid; });
-            bool endFound = endOid.empty() || std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == endOid; });
+            bool startExists = startOid.empty() || std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == startOid; });
+            bool endExists = endOid.empty() || std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == endOid; });
 
-            if (!startFound && !endFound) {
+            if (!startExists || !endExists) {
                 return {};
             }
 
+            std::vector<CommitRecord> result;
             bool insideRange = startOid.empty();
 
             for (const auto& c : commits) {
@@ -94,10 +94,6 @@ namespace xray::history {
                 }
 
                 if (!endOid.empty() && c.oid == endOid) {
-                    if (!insideRange) {
-                        result.clear();
-                        result.push_back(c);
-                    }
                     break;
                 }
             }
@@ -121,7 +117,9 @@ namespace xray::history {
                     return ch.commitOid == c.oid &&
                         ((ch.newPath && *ch.newPath == filePath) || (ch.oldPath && *ch.oldPath == filePath));
                     });
-                if (touchedFile) result.push_back(c);
+                if (touchedFile) {
+                    result.push_back(c);
+                }
             }
             return result;
         }
@@ -148,15 +146,19 @@ namespace xray::history {
     class ExplicitSelection : public RevisionSelection {
     private:
         std::vector<Oid> targetOids;
-    public: // Виправлено доступ (було pub:)
+    public:
         explicit ExplicitSelection(std::vector<Oid> oids) : targetOids(std::move(oids)) {}
 
         [[nodiscard]] std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const override {
             std::vector<CommitRecord> result;
-            for (const auto& c : commits) {
-                if (std::find(targetOids.begin(), targetOids.end(), c.oid) != targetOids.end()) {
-                    result.push_back(c);
+            for (const auto& targetOid : targetOids) {
+                auto it = std::find_if(commits.begin(), commits.end(), [&](const CommitRecord& c) {
+                    return c.oid == targetOid;
+                    });
+                if (it == commits.end()) {
+                    throw std::invalid_argument("ExplicitSelection: requested OID not found: " + targetOid);
                 }
+                result.push_back(*it);
             }
             return result;
         }
@@ -166,12 +168,15 @@ namespace xray::history {
     private:
         std::size_t step;
     public:
-        explicit PeriodicSelection(std::size_t s) : step(s == 0 ? 1 : s) {}
+        explicit PeriodicSelection(std::size_t s) : step(s) {
+            if (s == 0) {
+                throw std::invalid_argument("PeriodicSelection: step size cannot be 0");
+            }
+        }
 
         [[nodiscard]] std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const override {
             std::vector<CommitRecord> result;
-            std::size_t effectiveStep = (step == 0) ? 1 : step;
-            for (std::size_t i = 0; i < commits.size(); i += effectiveStep) {
+            for (std::size_t i = 0; i < commits.size(); i += step) {
                 result.push_back(commits[i]);
             }
             return result;
