@@ -73,8 +73,6 @@ namespace xray::history {
         CommitRangeQuery(Oid start, Oid end) : startOid(std::move(start)), endOid(std::move(end)) {}
 
         [[nodiscard]] std::vector<CommitRecord> apply(const std::vector<CommitRecord>& commits) const override {
-            if (commits.empty()) return {};
-
             bool startExists = startOid.empty() || std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == startOid; });
             bool endExists = endOid.empty() || std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == endOid; });
 
@@ -83,6 +81,19 @@ namespace xray::history {
             }
             if (!endExists) {
                 throw std::invalid_argument("CommitRangeQuery: end boundary OID not found: " + endOid);
+            }
+
+            if (commits.empty()) {
+                return {};
+            }
+
+            if (!startOid.empty() && !endOid.empty() && startOid != endOid) {
+                auto startIt = std::find_if(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == startOid; });
+                auto endIt = std::find_if(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == endOid; });
+
+                if (std::distance(commits.begin(), startIt) > std::distance(commits.begin(), endIt)) {
+                    throw std::invalid_argument("CommitRangeQuery: inverted boundary order (start OID appears after end OID)");
+                }
             }
 
             std::vector<CommitRecord> result;

@@ -62,6 +62,28 @@ int main() {
         ensure(caughtRangeError, "CommitRangeQuery failed to report invalid boundary OID");
         std::cout << "  [OK] CommitRangeQuery explicitly reported invalid boundary OID\n";
 
+        bool caughtEmptyCommitsError = false;
+        try {
+            CommitRangeQuery emptyListQuery("oid4", "oid2");
+            executeQuery(emptyListQuery, {});
+        }
+        catch (const std::invalid_argument&) {
+            caughtEmptyCommitsError = true;
+        }
+        ensure(caughtEmptyCommitsError, "CommitRangeQuery failed to report boundary OID on empty commits list");
+        std::cout << "  [OK] CommitRangeQuery reported missing OID on empty commits list\n";
+
+        bool caughtInvertedRangeError = false;
+        try {
+            CommitRangeQuery invertedRange("oid2", "oid4");
+            executeQuery(invertedRange, mockCommits);
+        }
+        catch (const std::invalid_argument&) {
+            caughtInvertedRangeError = true;
+        }
+        ensure(caughtInvertedRangeError, "CommitRangeQuery failed to report inverted range order");
+        std::cout << "  [OK] CommitRangeQuery explicitly reported inverted range order\n";
+
         FileHistoryQuery fileQuery("src/history/api.hpp", mockChanges);
         auto fileResult = executeQuery(fileQuery, mockCommits);
         ensure(fileResult.size() == 1 && fileResult[0].oid == "oid3", "File query result mismatch");
