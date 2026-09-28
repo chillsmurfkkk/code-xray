@@ -7,6 +7,7 @@
 #include <vector>
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 #include <stdexcept>
 
 #include "common/job.hpp"
@@ -77,8 +78,11 @@ namespace xray::history {
             bool startExists = startOid.empty() || std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == startOid; });
             bool endExists = endOid.empty() || std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) { return c.oid == endOid; });
 
-            if (!startExists || !endExists) {
-                return {};
+            if (!startExists) {
+                throw std::invalid_argument("CommitRangeQuery: start boundary OID not found: " + startOid);
+            }
+            if (!endExists) {
+                throw std::invalid_argument("CommitRangeQuery: end boundary OID not found: " + endOid);
             }
 
             std::vector<CommitRecord> result;
@@ -150,15 +154,22 @@ namespace xray::history {
         explicit ExplicitSelection(std::vector<Oid> oids) : targetOids(std::move(oids)) {}
 
         [[nodiscard]] std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const override {
-            std::vector<CommitRecord> result;
-            for (const auto& targetOid : targetOids) {
-                auto it = std::find_if(commits.begin(), commits.end(), [&](const CommitRecord& c) {
-                    return c.oid == targetOid;
+            std::unordered_set<Oid> requestedSet(targetOids.begin(), targetOids.end());
+
+            for (const auto& reqOid : requestedSet) {
+                bool found = std::any_of(commits.begin(), commits.end(), [&](const CommitRecord& c) {
+                    return c.oid == reqOid;
                     });
-                if (it == commits.end()) {
-                    throw std::invalid_argument("ExplicitSelection: requested OID not found: " + targetOid);
+                if (!found) {
+                    throw std::invalid_argument("ExplicitSelection: requested OID not found: " + reqOid);
                 }
-                result.push_back(*it);
+            }
+
+            std::vector<CommitRecord> result;
+            for (const auto& c : commits) {
+                if (requestedSet.erase(c.oid) > 0) {
+                    result.push_back(c);
+                }
             }
             return result;
         }
