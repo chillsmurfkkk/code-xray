@@ -1,8 +1,14 @@
 #include "history/types.hpp"
 #include <iostream>
 #include <vector>
-#include <cassert>
 #include <stdexcept>
+#include <string>
+
+void ensure(bool condition, const std::string& message) {
+    if (!condition) {
+        throw std::runtime_error("Test assertion failed: " + message);
+    }
+}
 
 std::vector<xray::history::CommitRecord> executeQuery(
     const xray::history::HistoryQuery& query,
@@ -21,7 +27,7 @@ std::vector<xray::history::CommitRecord> executeSelection(
 int main() {
     using namespace xray::history;
 
-    std::cout << "  CodeXray: History Module Validation (LR #1 Requirements)\n";
+    std::cout << "  CodeXray: History Module Validation (PR #1 Verification)\n";
 
     std::vector<CommitRecord> mockCommits = {
         {"oid4", {"oid3"}, "test3", "c@test.com", {}, {}, "Add analysis metrics"},
@@ -37,36 +43,43 @@ int main() {
         {"oid1", std::nullopt, std::nullopt, "src/app/main.cpp", ChangeStatus::added, 15, 0}
     };
 
-    std::cout << "1. Testing HistoryQuery via Polymorphic Interface (HistoryQuery&)\n";
+    std::cout << "1. Testing HistoryQuery Polymorphism & Boundaries\n";
     {
         CommitRangeQuery rangeQuery("oid4", "oid2");
         auto rangeResult = executeQuery(rangeQuery, mockCommits);
-        assert(rangeResult.size() == 3);
-        assert(rangeResult[0].oid == "oid4" && rangeResult[2].oid == "oid2");
+        ensure(rangeResult.size() == 3, "Range query size mismatch");
+        ensure(rangeResult[0].oid == "oid4" && rangeResult[2].oid == "oid2", "Range bounds mismatch");
         std::cout << "  [OK] CommitRangeQuery returned valid range oid4..oid2\n";
 
-        CommitRangeQuery invalidRange("non_existing_oid", "oid2");
-        auto invalidResult = executeQuery(invalidRange, mockCommits);
-        assert(invalidResult.empty());
-        std::cout << "  [OK] CommitRangeQuery correctly rejected invalid start boundary\n";
+        bool caughtRangeError = false;
+        try {
+            CommitRangeQuery invalidRange("non_existing_oid", "oid2");
+            executeQuery(invalidRange, mockCommits);
+        }
+        catch (const std::invalid_argument&) {
+            caughtRangeError = true;
+        }
+        ensure(caughtRangeError, "CommitRangeQuery failed to report invalid boundary OID");
+        std::cout << "  [OK] CommitRangeQuery explicitly reported invalid boundary OID\n";
 
         FileHistoryQuery fileQuery("src/history/api.hpp", mockChanges);
         auto fileResult = executeQuery(fileQuery, mockCommits);
-        assert(fileResult.size() == 1 && fileResult[0].oid == "oid3");
+        ensure(fileResult.size() == 1 && fileResult[0].oid == "oid3", "File query result mismatch");
         std::cout << "  [OK] FileHistoryQuery correctly filtered commits touching history/api.hpp\n";
     }
 
-    std::cout << "\n2. Testing RevisionSelection Strategies (RevisionSelection&)\n";
+    std::cout << "\n2. Testing RevisionSelection Deduplication & Chain Order\n";
     {
         LastNSelection last2(2);
         auto last2Result = executeSelection(last2, mockCommits);
-        assert(last2Result.size() == 2 && last2Result[0].oid == "oid4");
+        ensure(last2Result.size() == 2 && last2Result[0].oid == "oid4", "LastN selection mismatch");
         std::cout << "  [OK] LastNSelection picked 2 newest commits\n";
 
-        ExplicitSelection explicitSel(std::vector<Oid>{"oid3", "oid1"});
+        ExplicitSelection explicitSel(std::vector<Oid>{"oid1", "oid3", "oid1"});
         auto explicitResult = executeSelection(explicitSel, mockCommits);
-        assert(explicitResult.size() == 2 && explicitResult[0].oid == "oid3" && explicitResult[1].oid == "oid1");
-        std::cout << "  [OK] ExplicitSelection picked exact OIDs in requested order\n";
+        ensure(explicitResult.size() == 2, "ExplicitSelection deduplication failed");
+        ensure(explicitResult[0].oid == "oid3" && explicitResult[1].oid == "oid1", "ExplicitSelection failed to preserve chain order");
+        std::cout << "  [OK] ExplicitSelection deduplicated OIDs and preserved repository chain order\n";
 
         bool caughtExplicitError = false;
         try {
@@ -76,12 +89,12 @@ int main() {
         catch (const std::invalid_argument&) {
             caughtExplicitError = true;
         }
-        assert(caughtExplicitError);
-        std::cout << "  [OK] ExplicitSelection threw exception on non-existing OID\n";
+        ensure(caughtExplicitError, "ExplicitSelection failed to report missing OID");
+        std::cout << "  [OK] ExplicitSelection reported missing OID\n";
 
         PeriodicSelection periodic(2);
         auto periodicResult = executeSelection(periodic, mockCommits);
-        assert(periodicResult.size() == 2 && periodicResult[0].oid == "oid4" && periodicResult[1].oid == "oid2");
+        ensure(periodicResult.size() == 2 && periodicResult[0].oid == "oid4" && periodicResult[1].oid == "oid2", "Periodic selection mismatch");
         std::cout << "  [OK] PeriodicSelection with step=2 picked {oid4, oid2}\n";
 
         bool caughtPeriodicError = false;
@@ -91,8 +104,8 @@ int main() {
         catch (const std::invalid_argument&) {
             caughtPeriodicError = true;
         }
-        assert(caughtPeriodicError);
-        std::cout << "  [OK] PeriodicSelection threw exception on step=0\n";
+        ensure(caughtPeriodicError, "PeriodicSelection failed to reject step=0");
+        std::cout << "  [OK] PeriodicSelection rejected step=0\n";
     }
 
     std::cout << "\n3. Testing Generic groupRecords\n";
@@ -100,17 +113,17 @@ int main() {
         auto groupedByAuthor = groupRecords(mockCommits, [](const CommitRecord& c) {
             return c.authorName;
             });
-        assert(groupedByAuthor.size() == 3); // test3, test2, test1
+        ensure(groupedByAuthor.size() == 3, "Grouping by author failed");
         std::cout << "  [OK] groupRecords grouped commits by Author into 3 groups\n";
 
         auto groupedByStatus = groupRecords(mockChanges, [](const ChangeRecord& ch) {
             return ch.status;
             });
-        assert(groupedByStatus.size() == 2); // modified, added
+        ensure(groupedByStatus.size() == 2, "Grouping by status failed");
         std::cout << "  [OK] groupRecords grouped changes by Status into 2 groups\n";
     }
 
-    std::cout << "  ALL LR #1 REQUIREMENTS SUCCESSFULLY VERIFIED!\n";
+    std::cout << "  PR #1 VERIFICATION PASSED (OOP BASE & REVISION CORE)\n";
 
     return 0;
 }
