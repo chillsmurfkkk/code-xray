@@ -33,6 +33,9 @@ add_library(xray_review INTERFACE)
 target_link_libraries(xray_review INTERFACE xray_analysis)
 
 if(BUILD_TESTING)
+    add_executable(review_tests tests/review/review_tests.cpp)
+    target_link_libraries(review_tests PRIVATE xray_review)
+    add_test(NAME review COMMAND review_tests)
     add_executable(history_test tests/history_test.cpp)
     target_link_libraries(history_test PRIVATE xray_history)
     add_test(NAME history_test COMMAND history_test)
@@ -58,11 +61,11 @@ endif()
 if(CODE_XRAY_BUILD_APP)
     include(cmake/Dependencies.cmake)
     
-    # Відновлено WIN32
+    # Г‚ВіГ¤Г­Г®ГўГ«ГҐГ­Г® WIN32
     qt_add_executable(code-xray WIN32 src/app/main.cpp)
     target_link_libraries(code-xray PRIVATE Qt6::Widgets xray_history xray_review)
 
-    # Відновлено POST_BUILD для windeployqt
+    # Г‚ВіГ¤Г­Г®ГўГ«ГҐГ­Г® POST_BUILD Г¤Г«Гї windeployqt
     add_custom_command(TARGET code-xray POST_BUILD
         COMMAND "$<TARGET_FILE:Qt6::windeployqt>" --no-translations --no-compiler-runtime "$<TARGET_FILE:code-xray>"
         VERBATIM)

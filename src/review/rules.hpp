@@ -1,57 +1,55 @@
 #pragma once
+
+#include "review/types.hpp"
+#include "review/matching.hpp"
 #include <string>
+#include <cstdint>
 
 namespace xray::review {
 
 class ComparisonRule {
 public:
-    virtual~ComparisonRule() = default;
+    virtual ~ComparisonRule() = default;
 
     virtual std::string name() const = 0;
 
-    virtual bool evaluate(const std::string& entityKey) const = 0;
+    virtual bool evaluate(const EntityReview<std::string, std::int64_t>& review) const = 0;
 };
 
 class MetricGrowthRule : public ComparisonRule {
-    int m_maxAllowedGrowth;
+    std::int64_t m_maxAllowedGrowth;
 public:
-
-    explicit MetricGrowthRule(int maxAllowedGrowth = 10)
+    explicit MetricGrowthRule(std::int64_t maxAllowedGrowth = 10)
     : m_maxAllowedGrowth(maxAllowedGrowth) {}
 
-    std::string name() const override{
+    std::string name() const override {
         return "MetricGrowthRule";
     }
 
-    bool evaluate(const std::string& entityKey) const override {
-        if (m_maxAllowedGrowth < entityKey.size()) {
-            return false;
-        }
-        else {
-            return true;
-        }
+    bool evaluate(const EntityReview<std::string, std::int64_t>& review) const override {
+        return review.metricDiff > m_maxAllowedGrowth;
     }
 };
-class NewFindingRule : public ComparisonRule {
-        public:
-        std::string name() const override {
-            return "NewFindingRule";
-        }
 
-        bool evaluate(const std::string& entityKey) const override {
-            return !entityKey.empty();
-        }
-    };
+class NewFindingRule : public ComparisonRule {
+public:
+    std::string name() const override {
+        return "NewFindingRule";
+    }
+
+    bool evaluate(const EntityReview<std::string, std::int64_t>& review) const override {
+        return review.kind == MatchKind::added;
+    }
+};
 
 class ResolvedFindingRule : public ComparisonRule {
-    public:
-
+public:
     std::string name() const override {
         return "ResolvedFindingRule";
     }
 
-    bool evaluate(const std::string& entityKey) const override {
-        return !entityKey.empty();
+    bool evaluate(const EntityReview<std::string, std::int64_t>& review) const override {
+        return review.kind == MatchKind::removed;
     }
 };
 
