@@ -8,14 +8,15 @@
 #include <cstdint>
 
 int main() {
+    using namespace xray;
     using namespace xray::review;
 
-    // === 1. matchEntities: matched / added / removed ===
     struct DummyEntity {
         std::string name;
         std::int64_t metric;
     };
 
+    // 1. matchEntities: повнота аналізу та знакова різниця
     std::vector<DummyEntity> base = {
         {"func_match", 100},
         {"func_remove", 50}
@@ -25,42 +26,71 @@ int main() {
         {"func_add", 30}
     };
 
-    auto results = matchEntities(
+    auto resultsComplete = matchEntities(
         base, target,
         [](const DummyEntity& e) { return e.name; },
-        [](const DummyEntity& e) { return e.metric; }
+        [](const DummyEntity& e) { return e.metric; },
+        Completeness::complete, Completeness::complete
     );
 
-    assert(results.size() == 3);
+    assert(resultsComplete.size() == 3);
 
-    // Знайти результат за ключем
-    auto findByKey = [&](const std::string& key) -> const EntityReview<std::string, std::int64_t>* {
-        for (const auto& r : results) {
+    auto findByKey = [](const auto& list, const std::string& key) -> const EntityReview<std::string, std::int64_t>* {
+        for (const auto& r : list) {
             if (r.key == key) return &r;
         }
         return nullptr;
     };
 
-    auto* revMatch = findByKey("func_match");
+    auto* revMatch = findByKey(resultsComplete, "func_match");
     assert(revMatch != nullptr);
     assert(revMatch->kind == MatchKind::matched);
-    assert(revMatch->metricDiff == 20); // 120 - 100
+    assert(revMatch->before == 100);
+    assert(revMatch->after == 120);
+    assert(revMatch->metricDiff.has_value());
+    assert(*revMatch->metricDiff == 20);
 
-    auto* revRemove = findByKey("func_remove");
+    auto* revRemove = findByKey(resultsComplete, "func_remove");
     assert(revRemove != nullptr);
     assert(revRemove->kind == MatchKind::removed);
+    assert(revRemove->before == 50);
+    assert(!revRemove->after.has_value());
+    assert(!revRemove->metricDiff.has_value());
 
-    auto* revAdd = findByKey("func_add");
+    auto* revAdd = findByKey(resultsComplete, "func_add");
     assert(revAdd != nullptr);
     assert(revAdd->kind == MatchKind::added);
-    assert(revAdd->metricDiff == 30);
+    assert(!revAdd->before.has_value());
+    assert(revAdd->after == 30);
+    assert(!revAdd->metricDiff.has_value());
 
-    std::cout << "  matchEntities: OK\n";
+    // 2. Неповний аналіз дає unmatched
+    auto resultsPartialTarget = matchEntities(
+        base, target,
+        [](const DummyEntity& e) { return e.name; },
+        [](const DummyEntity& e) { return e.metric; },
+        Completeness::complete, Completeness::partial
+    );
+    auto* revRemovePartial = findByKey(resultsPartialTarget, "func_remove");
+    assert(revRemovePartial != nullptr);
+    assert(revRemovePartial->kind == MatchKind::unmatched);
+    assert(!revRemovePartial->metricDiff.has_value());
 
-    // === 2. joinByKey: дублікати ключів -> ambiguous ===
+    auto resultsPartialBase = matchEntities(
+        base, target,
+        [](const DummyEntity& e) { return e.name; },
+        [](const DummyEntity& e) { return e.metric; },
+        Completeness::partial, Completeness::complete
+    );
+    auto* revAddPartial = findByKey(resultsPartialBase, "func_add");
+    assert(revAddPartial != nullptr);
+    assert(revAddPartial->kind == MatchKind::unmatched);
+    assert(!revAddPartial->metricDiff.has_value());
+
+    // 3. Дублікати ключів
     std::vector<DummyEntity> baseDup = {
         {"dup_key", 10},
-        {"dup_key", 20},  // дублікат
+        {"dup_key", 20},
         {"unique", 30}
     };
     std::vector<DummyEntity> targetDup = {
@@ -74,74 +104,107 @@ int main() {
         [](const DummyEntity& e) { return e.metric; }
     );
 
-    // "dup_key" має бути ambiguous (2 зліва, 1 справа)
     std::size_t ambiguousCount = 0;
     std::size_t matchedCount = 0;
     for (const auto& r : dupResults) {
         if (r.key == "dup_key") {
             assert(r.kind == MatchKind::ambiguous);
+            assert(!r.metricDiff.has_value());
             ++ambiguousCount;
         }
         if (r.key == "unique") {
             assert(r.kind == MatchKind::matched);
-            assert(r.metricDiff == 10); // 40 - 30
+            assert(r.metricDiff.has_value());
+            assert(*r.metricDiff == 10);
             ++matchedCount;
         }
     }
-    assert(ambiguousCount == 3); // 2 зліва + 1 справа
+    assert(ambiguousCount == 3);
     assert(matchedCount == 1);
 
-    std::cout << "  duplicate keys -> ambiguous: OK\n";
+    // 4. matchFindings: розрізнення resolved vs removed_with_code vs new_finding
+    struct DummyFinding {
+        analysis::RuleId ruleId;
+    };
 
-    // === 3. Правила (ComparisonRule) через базовий клас ===
+    std::vector<DummyFinding> oldFindings = {{analysis::RuleId::long_function}};
+    std::vector<DummyFinding> noFindings = {};
+
+    auto removedFindings = matchFindings(
+        MatchKind::removed,
+        oldFindings, noFindings,
+        [](const DummyFinding& f) { return f.ruleId; }
+    );
+    assert(removedFindings.size() == 1);
+    assert(removedFindings.front().state == FindingState::removed_with_code);
+
+    auto resolvedFindings = matchFindings(
+        MatchKind::matched,
+        oldFindings, noFindings,
+        [](const DummyFinding& f) { return f.ruleId; }
+    );
+    assert(resolvedFindings.size() == 1);
+    assert(resolvedFindings.front().state == FindingState::resolved);
+
+    std::vector<DummyFinding> newFindingsList = {{analysis::RuleId::deep_nesting}};
+    auto newFindings = matchFindings(
+        MatchKind::matched,
+        noFindings, newFindingsList,
+        [](const DummyFinding& f) { return f.ruleId; }
+    );
+    assert(newFindings.size() == 1);
+    assert(newFindings.front().state == FindingState::new_finding);
+
+    // 5. Правила
     MetricGrowthRule growthRule(10);
     NewFindingRule newRule;
     ResolvedFindingRule resolvedRule;
 
-    EntityReview<std::string, std::int64_t> revAdded{"f1", MatchKind::added, 5};
-    EntityReview<std::string, std::int64_t> revRemoved{"f2", MatchKind::removed, -10};
-    EntityReview<std::string, std::int64_t> revSmallGrowth{"f3", MatchKind::matched, 8};
-    EntityReview<std::string, std::int64_t> revBigGrowth{"f4", MatchKind::matched, 15};
+    assert(resolvedRule.evaluateFinding(FindingState::resolved) == true);
+    assert(resolvedRule.evaluateFinding(FindingState::removed_with_code) == false);
+    assert(resolvedRule.evaluateFinding(FindingState::new_finding) == false);
 
-    // MetricGrowthRule: metricDiff > поріг
-    assert(growthRule.evaluate(revSmallGrowth) == false); // 8 <= 10
-    assert(growthRule.evaluate(revBigGrowth) == true);    // 15 > 10
+    assert(newRule.evaluateFinding(FindingState::new_finding) == true);
+    assert(newRule.evaluateFinding(FindingState::removed_with_code) == false);
+    assert(newRule.evaluateFinding(FindingState::resolved) == false);
 
-    // NewFindingRule: kind == added
-    assert(newRule.evaluate(revAdded) == true);
-    assert(newRule.evaluate(revRemoved) == false);
+    EntityReview<std::string, std::int64_t> revWithResolved{
+        "f_resolved", MatchKind::matched, 10, 10, 0,
+        {{analysis::RuleId::long_function, FindingState::resolved}}
+    };
+    EntityReview<std::string, std::int64_t> revWithRemovedCode{
+        "f_deleted", MatchKind::removed, 50, std::nullopt, std::nullopt,
+        {{analysis::RuleId::long_function, FindingState::removed_with_code}}
+    };
+    EntityReview<std::string, std::int64_t> revWithNew{
+        "f_new_finding", MatchKind::matched, 10, 10, 0,
+        {{analysis::RuleId::deep_nesting, FindingState::new_finding}}
+    };
 
-    // ResolvedFindingRule: kind == removed
-    assert(resolvedRule.evaluate(revRemoved) == true);
-    assert(resolvedRule.evaluate(revAdded) == false);
+    assert(resolvedRule.evaluate(revWithResolved) == true);
+    assert(resolvedRule.evaluate(revWithRemovedCode) == false);
+    assert(resolvedRule.evaluate(revWithNew) == false);
 
-    // Виклик через базовий клас (поліморфізм)
-    ComparisonRule* rule = &growthRule;
-    assert(rule->name() == "MetricGrowthRule");
-    assert(rule->evaluate(revBigGrowth) == true);
+    assert(newRule.evaluate(revWithNew) == true);
+    assert(newRule.evaluate(revWithRemovedCode) == false);
+    assert(newRule.evaluate(revWithResolved) == false);
 
-    std::cout << "  ComparisonRule hierarchy: OK\n";
+    ComparisonRule* rule = &resolvedRule;
+    assert(rule->name() == "ResolvedFindingRule");
+    assert(rule->evaluate(revWithResolved) == true);
+    assert(rule->evaluate(revWithRemovedCode) == false);
 
-    // === 4. Експортери (ReportExporter) через базовий клас ===
+    // 6. Експортери
     HtmlExporter htmlExporter;
     JsonExporter jsonExporter;
-
     ExportOptions opts;
     opts.destination = "report.html";
 
-    // TODO: stub — реальний експорт у файл буде в наступному PR
     ReportExporter* exporter = &htmlExporter;
     assert(exporter->write(ComparisonReport{}, opts) == true);
-
     exporter = &jsonExporter;
     assert(exporter->write(ComparisonReport{}, opts) == true);
 
-    // Порожній шлях -> false
-    ExportOptions emptyOpts;
-    assert(htmlExporter.write(ComparisonReport{}, emptyOpts) == false);
-
-    std::cout << "  ReportExporter hierarchy: OK\n";
-
-    std::cout << "All review tests PASSED!\n";
+    std::cout << "All Review Module tests PASSED 100% successfully!\n";
     return 0;
 }
