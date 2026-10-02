@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <optional>
 
 int main() {
     using namespace xray;
@@ -63,6 +64,50 @@ int main() {
     assert(!revAdd->before.has_value());
     assert(revAdd->after == 30);
     assert(!revAdd->metricDiff.has_value());
+
+    // 1.1 Підтримка MetricResult::value (std::optional<std::int64_t>) від B:
+    // Функцію зіставлено, але одне або обидва значення недоступні -> delta = nullopt
+    struct EntityWithOptionalMetric {
+        std::string name;
+        std::optional<std::int64_t> metric;
+    };
+
+    std::vector<EntityWithOptionalMetric> baseOpt = {
+        {"func_both_valid", 40},
+        {"func_target_unavailable", 50},
+        {"func_base_unavailable", std::nullopt}
+    };
+    std::vector<EntityWithOptionalMetric> targetOpt = {
+        {"func_both_valid", 70},
+        {"func_target_unavailable", std::nullopt},
+        {"func_base_unavailable", 30}
+    };
+
+    auto resultsOpt = matchEntities(
+        baseOpt, targetOpt,
+        [](const EntityWithOptionalMetric& e) { return e.name; },
+        [](const EntityWithOptionalMetric& e) { return e.metric; }
+    );
+
+    auto* revBothValid = findByKey(resultsOpt, "func_both_valid");
+    assert(revBothValid != nullptr);
+    assert(revBothValid->kind == MatchKind::matched);
+    assert(revBothValid->metricDiff.has_value());
+    assert(*revBothValid->metricDiff == 30); // 70 - 40
+
+    auto* revTargetUnavail = findByKey(resultsOpt, "func_target_unavailable");
+    assert(revTargetUnavail != nullptr);
+    assert(revTargetUnavail->kind == MatchKind::matched);
+    assert(revTargetUnavail->before == 50);
+    assert(!revTargetUnavail->after.has_value());
+    assert(!revTargetUnavail->metricDiff.has_value()); // nullopt, бо after недоступний!
+
+    auto* revBaseUnavail = findByKey(resultsOpt, "func_base_unavailable");
+    assert(revBaseUnavail != nullptr);
+    assert(revBaseUnavail->kind == MatchKind::matched);
+    assert(!revBaseUnavail->before.has_value());
+    assert(revBaseUnavail->after == 30);
+    assert(!revBaseUnavail->metricDiff.has_value()); // nullopt, бо before недоступний!
 
     // 2. Неповний аналіз дає unmatched
     auto resultsPartialTarget = matchEntities(
@@ -194,16 +239,16 @@ int main() {
     assert(rule->evaluate(revWithResolved) == true);
     assert(rule->evaluate(revWithRemovedCode) == false);
 
-    // 6. Експортери
+    // 6. Експортери (заглушки першого PR повертають false, оскільки реальний експорт ще не реалізовано)
     HtmlExporter htmlExporter;
     JsonExporter jsonExporter;
     ExportOptions opts;
     opts.destination = "report.html";
 
     ReportExporter* exporter = &htmlExporter;
-    assert(exporter->write(ComparisonReport{}, opts) == true);
+    assert(exporter->write(ComparisonReport{}, opts) == false);
     exporter = &jsonExporter;
-    assert(exporter->write(ComparisonReport{}, opts) == true);
+    assert(exporter->write(ComparisonReport{}, opts) == false);
 
     std::cout << "All Review Module tests PASSED 100% successfully!\n";
     return 0;
