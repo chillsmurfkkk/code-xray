@@ -1,12 +1,12 @@
 #pragma once
 
 #include "common/result.hpp"
-#include <optional>
+#include "review/types.hpp"
 #include <cstddef>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
-#include "review/types.hpp"
 
 namespace xray::review {
 
@@ -75,6 +75,39 @@ enum class MatchKind : std::uint8_t {
     ambiguous,
     unmatched
 };
+
+// Хелпери для роботи з метриками (підтримка як чистого T, так і std::optional<T>)
+template <typename T>
+struct UnwrapOptional {
+    using type = T;
+};
+
+template <typename T>
+struct UnwrapOptional<std::optional<T>> {
+    using type = T;
+};
+
+template <typename T>
+using UnwrapOptionalT = typename UnwrapOptional<T>::type;
+
+template <typename T>
+std::optional<T> toOptionalMetric(const std::optional<T>& val) {
+    return val;
+}
+
+template <typename T>
+std::optional<T> toOptionalMetric(const T& val) {
+    return val;
+}
+
+template <typename T>
+std::optional<T> computeMetricDelta(const std::optional<T>& before, const std::optional<T>& after) {
+    if (before.has_value() && after.has_value()) {
+        return *after - *before;
+    }
+    return std::nullopt;
+}
+
 template <typename KeyType, typename MetricType>
 struct EntityReview {
     KeyType key;
@@ -94,49 +127,82 @@ auto matchEntities(const std::vector<TEntity>& base,
                    xray::Completeness targetCompleteness = xray::Completeness::complete)
 {
     using KeyType = std::invoke_result_t<KeyFn, const TEntity&>;
-    using MetricType = std::invoke_result_t<MetricFn, const TEntity&>;
+    using RawMetricType = std::invoke_result_t<MetricFn, const TEntity&>;
+    using MetricType = UnwrapOptionalT<RawMetricType>;
 
     std::vector<EntityReview<KeyType, MetricType>> results;
     auto joinRes = joinByKey(base, target, keyFn);
 
     for (const auto& pair : joinRes.matched) {
-        auto before = metricFn(base[pair.leftIndex]);
-        auto after = metricFn(target[pair.rightIndex]);
-        results.push_back({keyFn(base[pair.leftIndex]), MatchKind::matched, before, after, after - before});
+        auto beforeVal = toOptionalMetric(metricFn(base[pair.leftIndex]));
+        auto afterVal = toOptionalMetric(metricFn(target[pair.rightIndex]));
+        auto delta = computeMetricDelta(beforeVal, afterVal);
+        results.push_back({
+            keyFn(base[pair.leftIndex]),
+            MatchKind::matched,
+            beforeVal,
+            afterVal,
+            delta,
+            {}
+        });
     }
 
     for (std::size_t idx : joinRes.unmatchedLeft) {
-        auto before = metricFn(base[idx]);
-        if (targetCompleteness == xray::Completeness::complete) {
-            results.push_back({keyFn(base[idx]), MatchKind::removed, before, std::nullopt, std::nullopt});
-        }
-        else {
-            results.push_back({keyFn(base[idx]), MatchKind::unmatched, before, std::nullopt, std::nullopt});
-        }
+        auto beforeVal = toOptionalMetric(metricFn(base[idx]));
+        MatchKind kind = (targetCompleteness == xray::Completeness::complete)
+            ? MatchKind::removed
+            : MatchKind::unmatched;
+        results.push_back({
+            keyFn(base[idx]),
+            kind,
+            beforeVal,
+            std::nullopt,
+            std::nullopt,
+            {}
+        });
     }
 
     for (std::size_t idx : joinRes.unmatchedRight) {
-        auto after = metricFn(target[idx]);
-        if (baseCompleteness == xray::Completeness::complete) {
-            results.push_back({keyFn(target[idx]), MatchKind::added,std::nullopt, after, std::nullopt});
-        }
-        else {
-            results.push_back({keyFn(target[idx]), MatchKind::unmatched,std::nullopt, after, std::nullopt});
-        }
+        auto afterVal = toOptionalMetric(metricFn(target[idx]));
+        MatchKind kind = (baseCompleteness == xray::Completeness::complete)
+            ? MatchKind::added
+            : MatchKind::unmatched;
+        results.push_back({
+            keyFn(target[idx]),
+            kind,
+            std::nullopt,
+            afterVal,
+            std::nullopt,
+            {}
+        });
     }
 
     for (std::size_t idx : joinRes.ambiguousLeft) {
-        results.push_back({keyFn(base[idx]), MatchKind::ambiguous,std::nullopt,std::nullopt,std::nullopt });
+        results.push_back({
+            keyFn(base[idx]),
+            MatchKind::ambiguous,
+            toOptionalMetric(metricFn(base[idx])),
+            std::nullopt,
+            std::nullopt,
+            {}
+        });
     }
 
     for (std::size_t idx : joinRes.ambiguousRight) {
-        results.push_back({keyFn(target[idx]), MatchKind::ambiguous, std::nullopt,std::nullopt,std::nullopt});
+        results.push_back({
+            keyFn(target[idx]),
+            MatchKind::ambiguous,
+            std::nullopt,
+            toOptionalMetric(metricFn(target[idx])),
+            std::nullopt,
+            {}
+        });
     }
 
     return results;
 }
 
-   template <typename TFinding, typename RuleKeyFn>
+template <typename TFinding, typename RuleKeyFn>
 std::vector<FindingChange> matchFindings(
     MatchKind entityKind,
     const std::vector<TFinding>& baseFindings,
