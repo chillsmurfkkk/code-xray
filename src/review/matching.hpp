@@ -76,7 +76,6 @@ enum class MatchKind : std::uint8_t {
     unmatched
 };
 
-// Хелпери для роботи з метриками (підтримка як чистого T, так і std::optional<T>)
 template <typename T>
 struct UnwrapOptional {
     using type = T;
