@@ -27,7 +27,7 @@ public:
     }
 
     bool evaluate(const EntityReview<std::string, std::int64_t>& review) const override {
-        return review.metricDiff > m_maxAllowedGrowth;
+        return review.metricDiff.has_value() && *review.metricDiff > m_maxAllowedGrowth;
     }
 };
 
@@ -38,7 +38,13 @@ public:
     }
 
     bool evaluate(const EntityReview<std::string, std::int64_t>& review) const override {
-        return review.kind == MatchKind::added;
+        for (const auto& f : review.findings) {
+            if (f.state == FindingState::new_finding) return true;
+        }
+        return false;
+    }
+    bool evaluateFinding(FindingState state) const {
+        return state == FindingState::new_finding;
     }
 };
 
@@ -49,7 +55,13 @@ public:
     }
 
     bool evaluate(const EntityReview<std::string, std::int64_t>& review) const override {
-        return review.kind == MatchKind::removed;
+        for (const auto& f : review.findings) {
+            if (f.state == FindingState::resolved) return true;
+        }
+        return false;
+    }
+    bool evaluateFinding(FindingState state) const {
+        return state == FindingState::resolved;
     }
 };
 
