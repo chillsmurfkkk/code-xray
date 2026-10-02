@@ -11,10 +11,50 @@
 #include <memory>
 #include <utility>
 #include <variant>
+#include <optional>
 
 namespace xray::code {
 
 namespace {
+
+std::string pathToUtf8(const std::filesystem::path& path) {
+    const auto utf8 = path.generic_u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
+std::optional<std::string> filterExclusionReason(
+    const std::filesystem::path& relativePath,
+    const FileSelection& selection
+)
+{
+    for (const auto& component : relativePath.parent_path()) {
+        const auto directory = pathToUtf8(component);
+
+        const auto found = std::find(
+            selection.excludedDirectories.begin(),
+            selection.excludedDirectories.end(),
+            directory
+        );
+
+        if (found != selection.excludedDirectories.end()) {
+            return "Excluded directory: " + directory;
+        }
+    }
+
+    const auto extension = pathToUtf8(relativePath.extension());
+
+    const auto found = std::find(
+        selection.extensions.begin(),
+        selection.extensions.end(),
+        extension
+    );
+
+    if (found == selection.extensions.end()) {
+        return "File extension is not selected: " + extension;
+    }
+
+    return std::nullopt;
+}
 
 Result<std::filesystem::path> validateRoot(
         const std::filesystem::path& root
@@ -177,6 +217,19 @@ Result<SourceSnapshot> FileListProvider::collect(
         }
 
         const auto& relativePath = std::get<std::filesystem::path>(relativeResult);
+
+        if (const auto reason = filterExclusionReason(relativePath, request.selection)) {
+            Error diagnostic{
+                ErrorCode::invalid_input,
+                *reason
+            };
+
+            diagnostic.path = selectedPath;
+
+            snapshot.coverage.diagnostics.push_back(std::move(diagnostic));
+            ++snapshot.coverage.skippedElements;
+            continue;
+        }
 
         auto fileResult = validateSourceFile(root, relativePath);
 
