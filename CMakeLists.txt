@@ -20,8 +20,10 @@ if(MSVC)
     target_compile_options(xray_common INTERFACE /W4 /permissive- /utf-8)
 endif()
 
-add_library(xray_code INTERFACE)
-target_link_libraries(xray_code INTERFACE xray_common)
+add_library(xray_code STATIC
+    src/code/source.cpp
+)
+target_link_libraries(xray_code PUBLIC xray_common)
 
 add_library(xray_analysis INTERFACE)
 target_link_libraries(xray_analysis INTERFACE xray_code)
@@ -60,8 +62,8 @@ endif()
 
 if(CODE_XRAY_BUILD_APP)
     include(cmake/Dependencies.cmake)
-    
-    # Â³äíîâëåíî WIN32
+
+    # Build the Qt application
     qt_add_executable(code-xray WIN32 src/app/main.cpp)
     target_link_libraries(code-xray PRIVATE Qt6::Widgets xray_history xray_review)
 
