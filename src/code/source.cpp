@@ -12,6 +12,7 @@
 #include <utility>
 #include <variant>
 #include <optional>
+#include <unordered_set>
 
 namespace xray::code {
 
@@ -202,10 +203,22 @@ Result<SourceSnapshot> FileListProvider::collect(
         snapshot.coverage.diagnostics.push_back(std::move(error));
     };
 
-    for (const auto& selectedPath : request.selection.relativePaths) {
+    std::unordered_set<std::string> seenPaths;
+
+    const auto total = request.selection.relativePaths.size();
+
+    for (std::size_t index = 0; index < total; index++) {
         if (job.isCancelled()) {
             return Cancelled{snapshot.coverage.diagnostics};
         }
+
+        job.report("collect-files", index, total);
+
+        if (job.isCancelled()) {
+            return Cancelled{snapshot.coverage.diagnostics};
+        }
+
+        const auto& selectedPath = request.selection.relativePaths[index];
 
         const std::u8string utf8Path(selectedPath.begin(), selectedPath.end());
 
@@ -217,6 +230,12 @@ Result<SourceSnapshot> FileListProvider::collect(
         }
 
         const auto& relativePath = std::get<std::filesystem::path>(relativeResult);
+
+        const auto normalizedPath = pathToUtf8(relativePath);
+
+        if (!seenPaths.insert(normalizedPath).second) {
+            continue;
+        }
 
         if (const auto reason = filterExclusionReason(relativePath, request.selection)) {
             Error diagnostic{
@@ -250,13 +269,18 @@ Result<SourceSnapshot> FileListProvider::collect(
         }
 
         SourceFile file;
-        const auto normalizedPath = relativePath.generic_u8string();
-        file.relativePath.assign(normalizedPath.begin(), normalizedPath.end());
+        file.relativePath = normalizedPath;
 
         file.bytes = std::make_shared<const std::string>(std::move(std::get<std::string>(bytesResult)));
 
         snapshot.files.push_back(std::move(file));
     }
+
+    if (job.isCancelled()) {
+        return Cancelled{snapshot.coverage.diagnostics};
+    }
+
+    job.report("collect-files", total, total);
 
     if (job.isCancelled()) {
         return Cancelled{snapshot.coverage.diagnostics};
