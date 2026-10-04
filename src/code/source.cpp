@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <filesystem>
 #include <system_error>
@@ -14,6 +15,8 @@
 #include <optional>
 #include <unordered_set>
 #include <vector>
+#include <cstdint>
+#include <string_view>
 
 namespace xray::code {
 
@@ -147,6 +150,66 @@ Result<std::filesystem::path> validateSourceFile(
     return current;
 }
 
+bool isValidUtf8(std::string_view bytes) {
+    std::size_t index = 0;
+
+    while (index < bytes.size()) {
+        const auto first = static_cast<unsigned char>(bytes[index]);
+
+        if (first <= 0x7F) {
+            ++index;
+            continue;
+        }
+
+        std::size_t continuationCount = 0;
+        std::uint32_t codePoint = 0;
+        std::uint32_t minimum = 0;
+
+        if (first >= 0xC2 && first <= 0xDF) {
+            continuationCount = 1;
+            codePoint = first & 0x1F;
+            minimum = 0x80;
+        }
+        else if (first >= 0xE0 && first <= 0xEF) {
+            continuationCount = 2;
+            codePoint = first & 0x0F;
+            minimum = 0x800;
+        }
+        else if (first >= 0xF0 && first <= 0xF4) {
+            continuationCount = 3;
+            codePoint = first & 0x07;
+            minimum = 0x10000;
+        }
+        else {
+            return false;
+        }
+
+        if (bytes.size() - index <= continuationCount) {
+            return false;
+        }
+
+        for (std::size_t offset = 1; offset <= continuationCount; ++offset) {
+            const auto next = static_cast<unsigned char>(bytes[index+offset]);
+
+            if ((next & 0xC0) != 0x80) {
+                return false;
+            }
+
+            codePoint = (codePoint << 6) | (next & 0x3F);
+        }
+
+        if (codePoint < minimum ||
+            codePoint > 0x10FFFF ||
+            (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
+                return false;
+        }
+
+        index += continuationCount + 1;
+    }
+
+    return true;
+}
+
 Result<std::string> readFileBytes(
     const std::filesystem::path& path,
     const JobContext& job
@@ -175,6 +238,41 @@ Result<std::string> readFileBytes(
 
     if (input.bad() || !input.eof()) {
         return Error{ErrorCode::read_error, "Cannot read file"};
+    }
+
+    if (job.isCancelled()) {
+        return Cancelled{};
+    }
+
+    const std::string_view view = bytes;
+
+    if (view.starts_with("\xFF\xFE") ||
+        view.starts_with("\xFE\xFF") ||
+        view.starts_with(std::string_view{"\x00\x00\xFE\xFF", 4})) {
+        return Error{
+            ErrorCode::unsupported_encoding,
+            "UTF-16/UTF-32 are not supported; expected UTF-8"
+        };
+    }
+
+    if (view.find('\0') != std::string_view::npos) {
+        return Error{
+            ErrorCode::invalid_input,
+            "Binary content detected: NUL byte"
+        };
+    }
+
+    const bool validUtf8 = isValidUtf8(view);
+
+    if (job.isCancelled()) {
+        return Cancelled{};
+    }
+
+    if (!validUtf8) {
+        return Error{
+            ErrorCode::unsupported_encoding,
+            "File content is not valid UTF-8"
+        };
     }
 
     return bytes;
@@ -306,6 +404,67 @@ Result<DirectoryScan> scanDirectory(
 
 } // namespace
 
+Result<SourceSnapshot> DirectoryProvider::collect(
+    const SourceRequest &request,
+    const JobContext &job
+)
+{
+    if (job.isCancelled()) {
+        return Cancelled{};
+    }
+
+    auto rootResult = validateRoot(request.root);
+
+    if (const auto* error = std::get_if<Error>(&rootResult)) {
+        return *error;
+    }
+
+    const auto& root = std::get<std::filesystem::path>(rootResult);
+
+    auto scanResult = scanDirectory(root, request.selection, job);
+
+    if (const auto* error = std::get_if<Error>(&scanResult)) {
+        return *error;
+    }
+
+    if (const auto* cancelled = std::get_if<Cancelled>(&scanResult)) {
+            return *cancelled;
+    }
+
+    const auto& scan = std::get<DirectoryScan>(scanResult);
+
+    auto filesRequest = request;
+    filesRequest.selection.relativePaths = scan.relativePaths;
+
+    FileListProvider provider;
+    auto result = provider.collect(filesRequest, job);
+
+    if (auto* snapshot = std::get_if<SourceSnapshot>(&result)) {
+        snapshot->selection = request.selection;
+
+        snapshot->coverage.skippedElements += scan.coverage.skippedElements;
+
+        if (scan.coverage.completeness == Completeness::partial) {
+            snapshot->coverage.completeness = Completeness::partial;
+        }
+
+        snapshot->coverage.diagnostics.insert(
+            snapshot->coverage.diagnostics.begin(),
+            scan.coverage.diagnostics.begin(),
+            scan.coverage.diagnostics.end()
+        );
+    }
+    else if (auto* cancelled = std::get_if<Cancelled>(&result)) {
+        cancelled->diagnostics.insert(
+            cancelled->diagnostics.begin(),
+            scan.coverage.diagnostics.begin(),
+            scan.coverage.diagnostics.end()
+        );
+    }
+
+    return result;
+}
+
 Result<SourceSnapshot> FileListProvider::collect(
     const SourceRequest& request,
     const JobContext& job
@@ -431,11 +590,14 @@ Result<SourceSnapshot> collect(
     }
 
     if(request.selection.relativePaths.empty()) {
-        DirectoryProvider provider;
+        DirectoryProvider directory;
+        SourceProvider& provider = directory;
         return provider.collect(request, job);
     }
 
-    FileListProvider provider;
+    FileListProvider files;
+    SourceProvider& provider = files;
+
     return provider.collect(request, job);
 }
 

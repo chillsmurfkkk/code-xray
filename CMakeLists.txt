@@ -46,6 +46,10 @@ if(BUILD_TESTING)
     target_link_libraries(contract_tests PRIVATE xray_history xray_review)
     add_test(NAME contracts COMMAND contract_tests)
 
+    add_executable(source_provider_test tests/source_provider_test.cpp)
+    target_link_libraries(source_provider_test PRIVATE xray_code)
+    add_test(NAME source_provider COMMAND source_provider_test)
+
     set(contract_headers
         common/job.hpp common/result.hpp
         code/types.hpp code/api.hpp
