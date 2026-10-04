@@ -17,6 +17,8 @@
 #include <vector>
 #include <cstdint>
 #include <string_view>
+#include <atomic>
+#include <random>
 
 namespace xray::code {
 
@@ -25,6 +27,61 @@ namespace {
 std::string pathToUtf8(const std::filesystem::path& path) {
     const auto utf8 = path.generic_u8string();
     return std::string(utf8.begin(), utf8.end());
+}
+
+std::string makeSnapshotId() {
+    static const std::string sessionId = [] {
+        std::random_device random;
+
+        constexpr char digits[] = "0123456789abcdef";
+
+        std::string id(32, '0');
+
+        for (char& digit : id) {
+            digit = digits[random() & 0x0F];
+        }
+
+        return id;
+    }();
+
+    static std::atomic<std::uint64_t> sequence{1};
+
+    const auto number = sequence.fetch_add(1, std::memory_order_relaxed);
+
+    return "local:" + sessionId + ":" + std::to_string(number);
+
+}
+
+Result<std::string> makeContentId(
+    std::string_view bytes,
+    const JobContext& job
+)
+{
+    std::uint64_t hash = 14695981039346656037ULL;
+    constexpr std::uint64_t prime = 1099511628211ULL;
+
+    for (std::size_t index = 0; index < bytes.size(); ++index) {
+        if (index % 4096 == 0 && job.isCancelled()) {
+            return Cancelled{};
+        }
+
+        hash ^= static_cast<unsigned char>(bytes[index]);
+        hash *= prime;
+    }
+
+    if (job.isCancelled()) {
+        return Cancelled{};
+    }
+
+    constexpr char digits[] = "0123456789abcdef";
+    std::string hex(16, '0');
+
+    for (std::size_t index = 0; index < hex.size(); ++index) {
+        hex[hex.size() - 1 - index] = digits[hash & 0x0F];
+        hash >>= 4;
+    }
+
+    return "fnv1a64:" + hex;
 }
 
 bool isExcludedDirectory(
@@ -116,6 +173,35 @@ Result<std::filesystem::path> validateRelativePath(
     return normalized;
 }
 
+std::optional<Error> nestedGitExclusion(
+    const std::filesystem::path& directory
+)
+{
+    std::error_code ec;
+    const auto status =
+        std::filesystem::symlink_status(directory / ".git", ec);
+
+    if (status.type() == std::filesystem::file_type::not_found) {
+        return std::nullopt;
+    }
+
+    if (ec) {
+        return Error{
+            ErrorCode::read_error,
+            "Cannot inspect nested Git metadata"
+        };
+    }
+
+    if (std::filesystem::exists(status)) {
+        return Error{
+            ErrorCode::invalid_input,
+            "Nested Git working trees (including submodules) are not supported"
+        };
+    }
+
+    return std::nullopt;
+}
+
 Result<std::filesystem::path> validateSourceFile(
     const std::filesystem::path& root,
     const std::filesystem::path& relativePath
@@ -138,8 +224,18 @@ Result<std::filesystem::path> validateSourceFile(
             return Error{ErrorCode::read_error, "Cannot inspect selected file path"};
         }
 
-        if (std::filesystem::is_symlink(status)) {
-            return Error{ErrorCode::invalid_input, "Symbolic links are not supported"};
+        if (std::filesystem::is_symlink(status) ||
+            status.type() == std::filesystem::file_type::junction) {
+            return Error{
+                ErrorCode::invalid_input,
+                "Symbolic links and junctions are not supported"
+            };
+        }
+
+        if (std::filesystem::is_directory(status)) {
+            if (const auto error = nestedGitExclusion(current)) {
+                return *error;
+            }
         }
     }
 
@@ -339,12 +435,13 @@ Result<DirectoryScan> scanDirectory(
                 relativeText
             }, true);
         }
-        else if (std::filesystem::is_symlink(status)) {
+        else if (std::filesystem::is_symlink(status) ||
+                 status.type() == std::filesystem::file_type::junction) {
             iterator.disable_recursion_pending();
 
             recordSkip(Error{
                 ErrorCode::invalid_input,
-                "Symbolic links are not supported",
+                "Symbolic links and junctions are not supported",
                 relativeText
             }, true);
         }
@@ -357,6 +454,12 @@ Result<DirectoryScan> scanDirectory(
                     "Directory excluded by selection",
                     relativeText
                 }, false);
+            }
+            else if (auto error = nestedGitExclusion(path)) {
+                iterator.disable_recursion_pending();
+
+                error->path = relativeText;
+                recordSkip(std::move(*error), true);
             }
         }
         else if (std::filesystem::is_regular_file(status)) {
@@ -483,6 +586,7 @@ Result<SourceSnapshot> FileListProvider::collect(
     const auto& root = std::get<std::filesystem::path>(rootResult);
 
     SourceSnapshot snapshot;
+    snapshot.id = makeSnapshotId();
     snapshot.kind = SourceKind::local;
     snapshot.selection = request.selection;
 
@@ -509,6 +613,18 @@ Result<SourceSnapshot> FileListProvider::collect(
         }
 
         const auto& selectedPath = request.selection.relativePaths[index];
+
+        if (selectedPath.find('\0') != std::string::npos ||
+            !isValidUtf8(selectedPath)) {
+            recordSkipped(
+                Error{
+                    ErrorCode::invalid_input,
+                    "File path must be valid UTF-8 without NUL bytes"
+                },
+                selectedPath
+            );
+            continue;
+        }
 
         const std::u8string utf8Path(selectedPath.begin(), selectedPath.end());
 
@@ -562,6 +678,14 @@ Result<SourceSnapshot> FileListProvider::collect(
         file.relativePath = normalizedPath;
 
         file.bytes = std::make_shared<const std::string>(std::move(std::get<std::string>(bytesResult)));
+
+        auto contentIdResult = makeContentId(*file.bytes, job);
+
+        if (std::holds_alternative<Cancelled>(contentIdResult)) {
+            return Cancelled{snapshot.coverage.diagnostics};
+        }
+
+        file.contentId = std::move(std::get<std::string>(contentIdResult));
 
         snapshot.files.push_back(std::move(file));
     }
