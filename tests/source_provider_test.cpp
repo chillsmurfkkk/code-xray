@@ -11,6 +11,7 @@
 #include <fstream>
 #include <string_view>
 #include <stop_token>
+#include <algorithm>
 
 namespace {
 
@@ -367,6 +368,126 @@ void cancellationNeverReturnsSnapshot()
     );
 }
 
+void snapshotAndContentIdsBehaveCorrectly()
+{
+    TempDirectory directory;
+    const auto path = directory.path / "main.cpp";
+
+    writeFile(path, "int first;\n");
+
+    xray::code::SourceRequest request;
+    request.root = directory.path;
+
+    auto collectSnapshot = [&] {
+        auto result = xray::code::collect(request, xray::JobContext{});
+
+        const auto* snapshot =
+            std::get_if<xray::code::SourceSnapshot>(&result);
+
+        check(snapshot != nullptr, "Collection must succeed");
+        check(snapshot->files.size() == 1, "Expected one source file");
+
+        return *snapshot;
+    };
+
+    const auto first = collectSnapshot();
+    const auto second = collectSnapshot();
+
+    check(!first.id.empty(), "Snapshot ID must be populated");
+    check(!second.id.empty(), "Repeated snapshot ID must be populated");
+    check(first.id != second.id, "Separate collections must have different IDs");
+
+    const auto& firstContentId = first.files.front().contentId;
+
+    check(!firstContentId.empty(), "Content ID must be populated");
+    check(
+        firstContentId == second.files.front().contentId,
+        "Unchanged bytes must retain the same content ID"
+    );
+
+    writeFile(path, "int second;\n");
+    const auto changed = collectSnapshot();
+
+    check(
+        firstContentId != changed.files.front().contentId,
+        "These different contents must have different content IDs"
+    );
+}
+
+void nestedGitTreesAreSkipped()
+{
+    TempDirectory directory;
+
+    std::filesystem::create_directory(directory.path / ".git");
+
+    writeFile(directory.path / "good.cpp", "int good;\n");
+    writeFile(
+        directory.path / "module" / ".git",
+        "gitdir: ../.git/modules/module\n"
+    );
+    writeFile(
+        directory.path / "module" / "src" / "hidden.cpp",
+        "int hidden;\n"
+    );
+
+    const bool modes[] = {false, true};
+
+    for (bool explicitList : modes) {
+        xray::code::SourceRequest request;
+        request.root = directory.path;
+
+        if (explicitList) {
+            request.selection.relativePaths = {
+                "good.cpp",
+                "module/src/hidden.cpp"
+            };
+        }
+
+        auto result = xray::code::collect(request, xray::JobContext{});
+
+        const auto* snapshot =
+            std::get_if<xray::code::SourceSnapshot>(&result);
+
+        check(snapshot != nullptr, "Nested Git tree must allow partial success");
+        check(snapshot->files.size() == 1, "Nested source must be skipped");
+        check(
+            snapshot->files.front().relativePath == "good.cpp",
+            "Root repository source must remain"
+        );
+        check(
+            snapshot->coverage.completeness == xray::Completeness::partial,
+            "Unsupported nested Git tree must make coverage partial"
+        );
+
+        const std::size_t expectedSkips = explicitList ? 1 : 2;
+
+        check(
+            snapshot->coverage.skippedElements == expectedSkips &&
+            snapshot->coverage.diagnostics.size() == expectedSkips,
+            "Unexpected skips or diagnostics"
+        );
+
+        const std::string expectedPath =
+            explicitList ? "module/src/hidden.cpp" : "module";
+
+        const auto& diagnostics = snapshot->coverage.diagnostics;
+
+        const auto found = std::find_if(
+            diagnostics.begin(),
+            diagnostics.end(),
+            [&](const xray::Error& error) {
+                return error.path && *error.path == expectedPath;
+            }
+        );
+
+        check(found != diagnostics.end(), "Nested Git diagnostic is missing");
+        check(
+            found->code == xray::ErrorCode::invalid_input,
+            "Nested Git tree must have an unsupported-input diagnostic"
+        );
+    }
+}
+
 } // namespace
 
 int main()
@@ -376,6 +497,18 @@ int main()
         sourceBytesArePreserved();
         explicitSelectionDeduplicatesAndFilters();
         cancellationNeverReturnsSnapshot();
+        snapshotAndContentIdsBehaveCorrectly();
+        nestedGitTreesAreSkipped();
+
+        invalidSelectedPathIsSkipped(
+            "\xFF.cpp",
+            xray::ErrorCode::invalid_input
+        );
+
+        invalidSelectedPathIsSkipped(
+            std::string_view{"good.cpp\0ignored.cpp", 20},
+            xray::ErrorCode::invalid_input
+        );
 
         invalidSelectedPathIsSkipped(
             "missing.cpp",
