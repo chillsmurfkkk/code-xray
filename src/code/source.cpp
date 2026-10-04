@@ -13,6 +13,7 @@
 #include <variant>
 #include <optional>
 #include <unordered_set>
+#include <vector>
 
 namespace xray::code {
 
@@ -23,22 +24,28 @@ std::string pathToUtf8(const std::filesystem::path& path) {
     return std::string(utf8.begin(), utf8.end());
 }
 
+bool isExcludedDirectory(
+    const std::filesystem::path& directory,
+    const FileSelection& selection
+)
+{
+    const auto name = pathToUtf8(directory.filename());
+
+    return std::find(
+        selection.excludedDirectories.begin(),
+        selection.excludedDirectories.end(),
+        name
+    ) != selection.excludedDirectories.end();
+}
+
 std::optional<std::string> filterExclusionReason(
     const std::filesystem::path& relativePath,
     const FileSelection& selection
 )
 {
     for (const auto& component : relativePath.parent_path()) {
-        const auto directory = pathToUtf8(component);
-
-        const auto found = std::find(
-            selection.excludedDirectories.begin(),
-            selection.excludedDirectories.end(),
-            directory
-        );
-
-        if (found != selection.excludedDirectories.end()) {
-            return "Excluded directory: " + directory;
+        if (isExcludedDirectory(component, selection)) {
+            return "Excluded directory: " + pathToUtf8(component);
         }
     }
 
@@ -172,6 +179,130 @@ Result<std::string> readFileBytes(
 
     return bytes;
 }
+
+struct DirectoryScan {
+    std::vector<std::string> relativePaths;
+    Coverage coverage;
+};
+
+Result<DirectoryScan> scanDirectory(
+    const std::filesystem::path& root,
+    const FileSelection& selection,
+    const JobContext& job
+)
+{
+    if (job.isCancelled()) {
+        return Cancelled{};
+    }
+
+    std::error_code ec;
+    std::filesystem::recursive_directory_iterator iterator(
+        root,
+        std::filesystem::directory_options::none,
+        ec
+    );
+
+    if (ec) {
+        return Error{ErrorCode::read_error, "Cannot open root directory", "."};
+    }
+
+    const std::filesystem::recursive_directory_iterator end;
+    DirectoryScan scan;
+    std::size_t visited = 0;
+
+    auto recordSkip = [&](Error error, bool incomplete) {
+        if (incomplete) {
+            scan.coverage.completeness = Completeness::partial;
+        }
+
+        ++scan.coverage.skippedElements;
+        scan.coverage.diagnostics.push_back(std::move(error));
+    };
+
+    job.report("scan-directory", visited);
+
+    while (iterator != end) {
+        if (job.isCancelled()) {
+            return Cancelled{scan.coverage.diagnostics};
+        }
+
+        const auto path = iterator->path();
+        const auto relativePath = path.lexically_relative(root);
+        const auto relativeText = pathToUtf8(relativePath);
+
+        const auto status = iterator->symlink_status(ec);
+
+        if (ec) {
+            iterator.disable_recursion_pending();
+
+            recordSkip(Error{
+                ErrorCode::invalid_input,
+                "Cannot inspect directory entry",
+                relativeText
+            }, true);
+        }
+        else if (std::filesystem::is_symlink(status)) {
+            iterator.disable_recursion_pending();
+
+            recordSkip(Error{
+                ErrorCode::invalid_input,
+                "Symbolic links are not supported",
+                relativeText
+            }, true);
+        }
+        else if (std::filesystem::is_directory(status)) {
+            if (isExcludedDirectory(path, selection)) {
+                iterator.disable_recursion_pending();
+
+                recordSkip(Error{
+                    ErrorCode::invalid_input,
+                    "Directory excluded by selection",
+                    relativeText
+                }, true);
+            }
+        }
+        else if (std::filesystem::is_regular_file(status)) {
+            scan.relativePaths.push_back(relativeText);
+        }
+        else {
+            recordSkip(Error{
+                ErrorCode::invalid_input,
+                "Directory entry is not a regular file",
+                relativeText
+            }, true);
+        }
+
+        job.report("scan-directory", ++visited);
+
+        if (job.isCancelled()) {
+            return Cancelled{scan.coverage.diagnostics};
+        }
+
+        iterator.increment(ec);
+
+        if (ec) {
+            recordSkip(Error{
+                ErrorCode::read_error,
+                "Directory traversal stopped before completion",
+                relativeText
+            }, true);
+            break;
+        }
+    }
+
+    if (job.isCancelled()) {
+        return Cancelled{scan.coverage.diagnostics};
+    }
+
+    std::sort(scan.relativePaths.begin(), scan.relativePaths.end());
+
+    if (job.isCancelled()) {
+        return Cancelled{scan.coverage.diagnostics};
+    }
+
+    return scan;
+}
+
 
 } // namespace
 
