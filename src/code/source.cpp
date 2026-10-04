@@ -236,7 +236,7 @@ Result<DirectoryScan> scanDirectory(
             iterator.disable_recursion_pending();
 
             recordSkip(Error{
-                ErrorCode::invalid_input,
+                ErrorCode::read_error,
                 "Cannot inspect directory entry",
                 relativeText
             }, true);
@@ -258,7 +258,7 @@ Result<DirectoryScan> scanDirectory(
                     ErrorCode::invalid_input,
                     "Directory excluded by selection",
                     relativeText
-                }, true);
+                }, false);
             }
         }
         else if (std::filesystem::is_regular_file(status)) {
