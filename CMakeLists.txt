@@ -67,6 +67,12 @@ endif()
 if(CODE_XRAY_BUILD_APP)
     include(cmake/Dependencies.cmake)
 
+    target_sources(xray_code PRIVATE src/code/parse.cpp)
+    target_link_libraries(xray_code PRIVATE
+        xray_cpp_grammar
+        unofficial::tree-sitter::tree-sitter
+    )
+
     # Build the Qt application
     qt_add_executable(code-xray WIN32 src/app/main.cpp)
     target_link_libraries(code-xray PRIVATE Qt6::Widgets xray_history xray_review)
@@ -77,6 +83,10 @@ if(CODE_XRAY_BUILD_APP)
         VERBATIM)
 
     if(BUILD_TESTING)
+        add_executable(parser_tests tests/code/parser_tests.cpp)
+        target_link_libraries(parser_tests PRIVATE xray_code)
+        add_test(NAME parser COMMAND parser_tests)
+
         add_executable(dependency_smoke tests/dependencies.cpp)
         target_link_libraries(dependency_smoke PRIVATE xray_common xray_cpp_grammar
             unofficial::tree-sitter::tree-sitter libgit2::libgit2package

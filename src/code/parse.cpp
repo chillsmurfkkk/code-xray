@@ -12,6 +12,8 @@
 #include <optional>
 #include <string_view>
 #include <string>
+#include <variant>
+#include <utility>
 
 extern "C" const TSLanguage* tree_sitter_cpp();
 
@@ -229,7 +231,8 @@ std::optional<FunctionName> extractQualifiedName(
         kind != "destructor_name" &&
         kind != "operator_name" &&
         kind != "template_function" &&
-        kind != "template_method") {
+        kind != "template_method" &&
+        kind != "template_type") {
         return std::nullopt;
     }
 
@@ -243,9 +246,25 @@ std::optional<FunctionName> extractQualifiedName(
     return result;
 }
 
+std::string joinScope(
+    std::string_view outer,
+    std::string_view inner
+) {
+    if (outer.empty()) {
+        return std::string(inner);
+    }
+
+    if (inner.empty()) {
+        return std::string(outer);
+    }
+
+    return std::string(outer) + "::" + std::string(inner);
+}
+
 Result<std::shared_ptr<FunctionEntity>> extractFunction(
     TSNode node,
-    const SourceFile& file
+    const SourceFile& file,
+    std::string_view lexicalScope
 )
 {
     if (ts_node_is_null(node) ||
@@ -282,7 +301,7 @@ Result<std::shared_ptr<FunctionEntity>> extractFunction(
 
     auto function = std::make_shared<FunctionEntity>();
     function->name = functionName->name;
-    function->ownerName = functionName->ownerName;
+    function->ownerName = functionName->globallyQualified ? functionName->ownerName : joinScope(lexicalScope, functionName->ownerName);
     function->relativePath = file.relativePath;
     function->range = nodeRange(node);
 
@@ -303,7 +322,337 @@ Result<std::shared_ptr<FunctionEntity>> extractFunction(
     return function;
 }
 
+Result<std::shared_ptr<TypeEntity>> extractType(
+    TSNode node,
+    const SourceFile& file,
+    std::string_view lexicalScope
+)
+{
+    if (ts_node_is_null(node)) {
+        return Error{
+            ErrorCode::invalid_input,
+            "Expected a type node",
+            file.relativePath
+        };
+    }
+
+    const std::string_view kind = ts_node_type(node);
+
+    if (kind != "class_specifier" &&
+        kind != "struct_specifier" &&
+        kind != "union_specifier") {
+        return Error{
+            ErrorCode::invalid_input,
+            "Expected a class, struct or union node",
+            file.relativePath
+        };
+    }
+
+    if (!file.bytes || !nodeText(node, *file.bytes)) {
+        return Error{
+            ErrorCode::invalid_input,
+            "Type range is outside source bytes",
+            file.relativePath
+        };
+    }
+
+    const auto nameNode = ts_node_child_by_field_name(node, "name", 4);
+
+    if (ts_node_is_null(nameNode)) {
+        return Error{
+            ErrorCode::parse_incomplete,
+            "Anonymous type requires separate scope handling",
+            file.relativePath
+        };
+    }
+
+    const auto typeName = extractQualifiedName(nameNode, *file.bytes);
+
+    if (!typeName) {
+        return Error{
+            ErrorCode::parse_incomplete,
+            "Cannot extract type name",
+            file.relativePath
+        };
+    }
+
+    auto type = std::make_shared<TypeEntity>();
+    type->name = typeName->name;
+    type->range = nodeRange(node);
+
+    const auto owner = typeName->globallyQualified ? typeName->ownerName : joinScope(lexicalScope, typeName->ownerName);
+
+    type->qualifiedName = joinScope(owner, typeName->name);
+
+    return type;
+}
+
+bool walkStructure(
+    TSNode node,
+    const SourceFile& file,
+    CodeEntity& parent,
+    std::string_view scope,
+    ParsedUnit& unit,
+    const JobContext& job
+)
+{
+    if (job.isCancelled()) {
+        return false;
+    }
+
+    if (ts_node_is_null(node)) {
+        return true;
+    }
+
+    const std::string_view kind = ts_node_type(node);
+
+    auto recordFailure = [&](const Error& error) {
+        unit.diagnostics.push_back(ParseDiagnostic{file.relativePath, nodeRange(node), error});
+        unit.coverage.diagnostics.push_back(error);
+        unit.coverage.completeness = Completeness::partial;
+        ++unit.coverage.skippedElements;
+    };
+
+    if (kind == "namespace_definition") {
+        const auto nameNode = ts_node_child_by_field_name(node, "name", 4);
+        const auto body = ts_node_child_by_field_name(node, "body", 4);
+
+        std::string name = "(anonymous namespace)";
+
+        if (!ts_node_is_null(nameNode)) {
+            const auto text = nodeText(nameNode, *file.bytes);
+
+            if (!text || text->empty()) {
+                recordFailure(Error{
+                    ErrorCode::parse_incomplete,
+                    "Cannot extract namespace name",
+                    file.relativePath
+                });
+                return true;
+            }
+
+            name = std::string(*text);
+        }
+
+        const auto nestedScope = joinScope(scope, name);
+
+        return walkStructure(body, file, parent, nestedScope, unit, job);
+    }
+
+    if (kind == "function_definition") {
+        auto result = extractFunction(node, file, scope);
+
+        if (const auto* error = std::get_if<Error>(&result)) {
+            recordFailure(*error);
+            return true;
+        }
+
+        if (std::holds_alternative<Cancelled>(result)) {
+            return false;
+        }
+
+        auto function = std::get<std::shared_ptr<FunctionEntity>>(result);
+
+        parent.children.push_back(function);
+        unit.functions.push_back(function);
+        return true;
+    }
+
+    if (kind == "class_specifier" ||
+        kind == "struct_specifier" ||
+        kind == "union_specifier") {
+        auto result = extractType(node, file, scope);
+
+        if (const auto* error = std::get_if<Error>(&result)) {
+            recordFailure(*error);
+            return true;
+        }
+
+        if (std::holds_alternative<Cancelled>(result)) {
+            return false;
+        }
+
+        auto type = std::get<std::shared_ptr<TypeEntity>>(result);
+        const auto body = ts_node_child_by_field_name(
+            node, "body", 4
+        );
+
+        if (!walkStructure(body, file, *type, type->qualifiedName, unit, job)) {
+            return false;
+        }
+
+        parent.children.push_back(type);
+        return true;
+    }
+
+    if (kind == "lambda_expression") {
+        return true;
+    }
+
+    const auto count = ts_node_named_child_count(node);
+
+    for (std::uint32_t index = 0; index < count; ++index) {
+        const auto child = ts_node_named_child(node, index);
+
+        if (!walkStructure(
+                child, file, parent, scope, unit, job)) {
+            return false;
+        }
+    }
+
+    return !job.isCancelled();
+}
+
+Result<ParsedUnit> parseUnit(
+    TSParser& parser,
+    const SourceFile& file,
+    const JobContext& job
+)
+{
+    auto treeResult = parseTree(parser, file, job);
+
+    if (const auto* error = std::get_if<Error>(&treeResult)) {
+        return *error;
+    }
+
+    if (const auto* cancelled = std::get_if<Cancelled>(&treeResult)) {
+        return *cancelled;
+    }
+
+    const auto& tree = std::get<TreePtr>(treeResult);
+    const auto rootNode = ts_tree_root_node(tree.get());
+
+    ParsedUnit unit;
+    unit.relativePath = file.relativePath;
+
+    auto root = std::make_shared<FileEntity>();
+    root->name = file.relativePath;
+    root->relativePath = file.relativePath;
+    root->contentId = file.contentId;
+    root->sourceBytes = file.bytes;
+    root->range = nodeRange(rootNode);
+    root->range.startByte = 0;
+    root->range.startLine = 1;
+    root->range.endByte = file.bytes->size();
+
+    if (ts_node_has_error(rootNode)) {
+        Error error{
+            ErrorCode::parse_incomplete,
+            "Source file contains syntax errors",
+            file.relativePath
+        };
+
+        unit.diagnostics.push_back(ParseDiagnostic{file.relativePath, std::nullopt, error});
+        unit.coverage.diagnostics.push_back(error);
+        unit.coverage.completeness = Completeness::partial;
+    }
+
+    if (!walkStructure(rootNode, file, *root, "", unit, job)) {
+        return Cancelled{unit.coverage.diagnostics};
+    }
+
+    if (unit.coverage.completeness == Completeness::partial) {
+        root->parseState = Validity::unavailable;
+    }
+
+    unit.root = root;
+    return unit;
+}
+
 } // namespace
 
+Result<ParsedSnapshot> parse(
+    std::shared_ptr<const SourceSnapshot> source,
+    const ParseOptions& options,
+    const JobContext& job
+)
+{
+    if (job.isCancelled()) {
+        return Cancelled{};
+    }
+
+    if (!source) {
+        return Error{
+            ErrorCode::invalid_input,
+            "Source snapshot must not be null"
+        };
+    }
+
+    if (options != ParseOptions{}) {
+        return Error{
+            ErrorCode::invalid_input,
+            "Unsupported parser or structure version"
+        };
+    }
+
+    auto parserResult = createParser();
+
+    if (const auto* error = std::get_if<Error>(&parserResult)) {
+        return *error;
+    }
+
+    if (const auto* cancelled = std::get_if<Cancelled>(&parserResult)) {
+        return *cancelled;
+    }
+
+    const auto& parser = std::get<ParserPtr>(parserResult);
+
+    ParsedSnapshot snapshot;
+    snapshot.source = std::move(source);
+    snapshot.options = options;
+    snapshot.coverage = snapshot.source->coverage;
+
+    const auto total = snapshot.source->files.size();
+    snapshot.units.reserve(total);
+
+    job.report("parse-files", 0, total);
+
+    for (std::size_t index = 0; index < total; ++index) {
+        if (job.isCancelled()) {
+            return Cancelled{snapshot.coverage.diagnostics};
+        }
+
+        const auto& file = snapshot.source->files[index];
+        auto unitResult = parseUnit(*parser, file, job);
+
+        if (const auto* error = std::get_if<Error>(&unitResult)) {
+            return *error;
+        }
+
+        if (const auto* cancelled = std::get_if<Cancelled>(&unitResult)) {
+            auto diagnostics = snapshot.coverage.diagnostics;
+            diagnostics.insert(
+                diagnostics.end(),
+                cancelled->diagnostics.begin(),
+                cancelled->diagnostics.end()
+            );
+
+            return Cancelled{std::move(diagnostics)};
+        }
+
+        auto unit = std::move(std::get<ParsedUnit>(unitResult));
+
+        if (unit.coverage.completeness == Completeness::partial) {
+            snapshot.coverage.completeness = Completeness::partial;
+        }
+
+        snapshot.coverage.skippedElements += unit.coverage.skippedElements;
+
+        snapshot.coverage.diagnostics.insert(
+            snapshot.coverage.diagnostics.end(),
+            unit.coverage.diagnostics.begin(),
+            unit.coverage.diagnostics.end()
+        );
+
+        snapshot.units.push_back(std::move(unit));
+        job.report("parse-files", index + 1, total);
+    }
+
+    if (job.isCancelled()) {
+        return Cancelled{snapshot.coverage.diagnostics};
+    }
+
+    return snapshot;
+}
 
 } // namespace xray::code
