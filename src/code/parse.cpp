@@ -4,6 +4,7 @@
 #include "common/result.hpp"
 
 #include <cstddef>
+#include <ios>
 #include <tree_sitter/api.h>
 
 #include <memory>
@@ -14,6 +15,7 @@
 #include <string>
 #include <variant>
 #include <utility>
+#include <vector>
 
 extern "C" const TSLanguage* tree_sitter_cpp();
 
@@ -130,6 +132,89 @@ SourceRange nodeRange(TSNode node) {
     return range;
 }
 
+std::optional<std::vector<std::string>> normalizeDeclarator(
+    TSNode declarator,
+    std::string_view source
+)
+{
+    if (ts_node_is_null(declarator) || ts_node_has_error(declarator)) {
+        return std::nullopt;
+    }
+
+    std::vector<std::string> tokens;
+    std::vector<TSNode> pending{declarator};
+
+    while (!pending.empty()) {
+        const auto node = pending.back();
+        pending.pop_back();
+
+        if (ts_node_is_missing(node)) {
+            return std::nullopt;
+        }
+
+        if (std::string_view(ts_node_type(node)) == "comment") {
+            continue;
+        }
+
+        const auto count = ts_node_child_count(node);
+
+        if (count > 0) {
+            for (std::uint32_t index = count; index > 0; --index) {
+                pending.push_back(ts_node_child(node, index - 1));
+            }
+
+            continue;
+        }
+
+        const auto text = nodeText(node, source);
+
+        if (!text || text->empty()) {
+            return std::nullopt;
+        }
+
+        tokens.emplace_back(*text);
+    }
+
+    if (tokens.empty()) {
+        return std::nullopt;
+    }
+
+    return tokens;
+}
+
+std::optional<std::string> normalizeName(
+    TSNode node,
+    std::string_view source
+) {
+    const auto tokens = normalizeDeclarator(node, source);
+
+    if (!tokens) {
+        return std::nullopt;
+    }
+
+    const auto isWordByte = [](unsigned char byte) {
+        return (byte >= 'a' && byte <= 'z') ||
+               (byte >= 'A' && byte <= 'Z') ||
+               (byte >= '0' && byte <= '9') ||
+               byte == '_' ||
+               byte >= 0x80;
+    };
+
+    std::string name;
+
+    for (const auto& token : *tokens) {
+        if (!name.empty() &&
+            isWordByte(name.back()) &&
+            isWordByte(token.front())) {
+            name += ' ';
+        }
+
+        name += token;
+    }
+
+    return name;
+}
+
 TSNode findDeclaratorName(TSNode node) {
     if (ts_node_is_null(node)) {
         return {};
@@ -203,7 +288,7 @@ std::optional<FunctionName> extractQualifiedName(
         }
 
         if (!ts_node_is_null(scope)) {
-            const auto scopeText = nodeText(scope, source);
+            const auto scopeText = normalizeName(scope, source);
 
             if (!scopeText || scopeText->empty()) {
                 return std::nullopt;
@@ -236,7 +321,7 @@ std::optional<FunctionName> extractQualifiedName(
         return std::nullopt;
     }
 
-    const auto text = nodeText(node, source);
+    const auto text = normalizeName(node, source);
 
     if (!text || text->empty()) {
         return std::nullopt;
@@ -259,6 +344,29 @@ std::string joinScope(
     }
 
     return std::string(outer) + "::" + std::string(inner);
+}
+
+std::string makeIdentityKey(const FunctionEntity& function) {
+    std::string key;
+
+    auto appendField = [&key](std::string_view value) {
+        key += std::to_string(value.size());
+        key += ':';
+        key.append(value);
+    };
+
+    appendField(function.relativePath);
+    appendField(joinScope(function.ownerName, function.name));
+
+    for (const auto& token : function.signatureTokens) {
+        appendField(token);
+    }
+
+    return key;
+}
+
+EntityId makeEntityId(std::uint64_t& nextId) {
+    return "entity:" + std::to_string(nextId++);
 }
 
 Result<std::shared_ptr<FunctionEntity>> extractFunction(
@@ -297,6 +405,16 @@ Result<std::shared_ptr<FunctionEntity>> extractFunction(
         };
     }
 
+    auto signature = normalizeDeclarator(declarator, *file.bytes);
+
+    if (!signature) {
+        return Error{
+            ErrorCode::parse_incomplete,
+            "Cannot extract reliable declarator tokens",
+            file.relativePath
+        };
+    }
+
     const auto body = ts_node_child_by_field_name(node, "body", 4);
 
     auto function = std::make_shared<FunctionEntity>();
@@ -304,6 +422,8 @@ Result<std::shared_ptr<FunctionEntity>> extractFunction(
     function->ownerName = functionName->globallyQualified ? functionName->ownerName : joinScope(lexicalScope, functionName->ownerName);
     function->relativePath = file.relativePath;
     function->range = nodeRange(node);
+    function->signatureTokens = std::move(*signature);
+    function->identityKey = makeIdentityKey(*function);
 
     if (!ts_node_is_null(body)) {
         function->bodyRange = nodeRange(body);
@@ -393,6 +513,7 @@ bool walkStructure(
     CodeEntity& parent,
     std::string_view scope,
     ParsedUnit& unit,
+    std::uint64_t& nextId,
     const JobContext& job
 )
 {
@@ -420,7 +541,7 @@ bool walkStructure(
         std::string name = "(anonymous namespace)";
 
         if (!ts_node_is_null(nameNode)) {
-            const auto text = nodeText(nameNode, *file.bytes);
+            const auto text = normalizeName(nameNode, *file.bytes);
 
             if (!text || text->empty()) {
                 recordFailure(Error{
@@ -436,7 +557,7 @@ bool walkStructure(
 
         const auto nestedScope = joinScope(scope, name);
 
-        return walkStructure(body, file, parent, nestedScope, unit, job);
+        return walkStructure(body, file, parent, nestedScope, unit, nextId, job);
     }
 
     if (kind == "function_definition") {
@@ -452,6 +573,7 @@ bool walkStructure(
         }
 
         auto function = std::get<std::shared_ptr<FunctionEntity>>(result);
+        function->id = makeEntityId(nextId);
 
         parent.children.push_back(function);
         unit.functions.push_back(function);
@@ -473,11 +595,12 @@ bool walkStructure(
         }
 
         auto type = std::get<std::shared_ptr<TypeEntity>>(result);
+        type->id = makeEntityId(nextId);
         const auto body = ts_node_child_by_field_name(
             node, "body", 4
         );
 
-        if (!walkStructure(body, file, *type, type->qualifiedName, unit, job)) {
+        if (!walkStructure(body, file, *type, type->qualifiedName, unit, nextId, job)) {
             return false;
         }
 
@@ -494,8 +617,7 @@ bool walkStructure(
     for (std::uint32_t index = 0; index < count; ++index) {
         const auto child = ts_node_named_child(node, index);
 
-        if (!walkStructure(
-                child, file, parent, scope, unit, job)) {
+        if (!walkStructure(child, file, parent, scope, unit, nextId, job)) {
             return false;
         }
     }
@@ -506,6 +628,7 @@ bool walkStructure(
 Result<ParsedUnit> parseUnit(
     TSParser& parser,
     const SourceFile& file,
+    std::uint64_t& nextId,
     const JobContext& job
 )
 {
@@ -526,6 +649,7 @@ Result<ParsedUnit> parseUnit(
     unit.relativePath = file.relativePath;
 
     auto root = std::make_shared<FileEntity>();
+    root->id = makeEntityId(nextId);
     root->name = file.relativePath;
     root->relativePath = file.relativePath;
     root->contentId = file.contentId;
@@ -547,7 +671,7 @@ Result<ParsedUnit> parseUnit(
         unit.coverage.completeness = Completeness::partial;
     }
 
-    if (!walkStructure(rootNode, file, *root, "", unit, job)) {
+    if (!walkStructure(rootNode, file, *root, "", unit, nextId, job)) {
         return Cancelled{unit.coverage.diagnostics};
     }
 
@@ -607,13 +731,15 @@ Result<ParsedSnapshot> parse(
 
     job.report("parse-files", 0, total);
 
+    std::uint64_t nextId = 0;
+
     for (std::size_t index = 0; index < total; ++index) {
         if (job.isCancelled()) {
             return Cancelled{snapshot.coverage.diagnostics};
         }
 
         const auto& file = snapshot.source->files[index];
-        auto unitResult = parseUnit(*parser, file, job);
+        auto unitResult = parseUnit(*parser, file, nextId, job);
 
         if (const auto* error = std::get_if<Error>(&unitResult)) {
             return *error;
