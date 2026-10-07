@@ -9,6 +9,7 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -396,6 +397,174 @@ void cancellationKeepsDiagnostics() {
           "Cancellation must retain both inherited and collected diagnostics");
 }
 
+void declaratorTokensIgnoreFormatting() {
+    const auto compact = parseSuccessfully(source({{"tokens.cpp",
+        "int* find(const int& value, int count = 2) noexcept { return nullptr; }"}}));
+    const auto formatted = parseSuccessfully(source({{"tokens.cpp",
+        "int * /* result */ find ( const int & value, // argument\n"
+        "int count /* default */ = 2 ) noexcept { return nullptr; }"}}));
+    const std::vector<std::string> expected{
+        "*", "find", "(", "const", "int", "&", "value", ",",
+        "int", "count", "=", "2", ")", "noexcept"
+    };
+    check(functionNamed(compact.units.front(), "find").signatureTokens == expected,
+          "Declarator tokens must retain punctuation, parameters and qualifiers in order");
+    check(functionNamed(formatted.units.front(), "find").signatureTokens == expected,
+          "Whitespace and comments between tokens must not alter the declarator");
+}
+
+void literalContentsRemainSignificant() {
+    const auto first = parseSuccessfully(source({{"literal.cpp",
+        "void log(const char* text = \"a b\") {}"}}));
+    const auto second = parseSuccessfully(source({{"literal.cpp",
+        "void log(const char* text = \"ab\") {}"}}));
+    const auto& withSpace = functionNamed(first.units.front(), "log");
+    const auto& withoutSpace = functionNamed(second.units.front(), "log");
+    check(withSpace.signatureTokens != withoutSpace.signatureTokens,
+          "Spaces inside a string literal are source content, not formatting");
+    check(withSpace.identityKey != withoutSpace.identityKey,
+          "Changing a default argument literal must change the identity key");
+}
+
+void identityIgnoresBodyAndLineShifts() {
+    const auto before = parseSuccessfully(source({{"stable.cpp",
+        "namespace app { int run(int value) { return value; } }"}}));
+    const auto after = parseSuccessfully(source({{"stable.cpp",
+        "// Added header\n\nnamespace app {\n"
+        "int run /* renamed body only */ ( int value ) {\n"
+        "    const int doubled = value * 2;\n    return doubled;\n}\n}"}}));
+    const auto& oldFunction = functionNamed(before.units.front(), "run");
+    const auto& newFunction = functionNamed(after.units.front(), "run");
+    check(!oldFunction.identityKey.empty(), "Every extracted function needs an identity key");
+    check(oldFunction.range.startLine != newFunction.range.startLine,
+          "Test must move the function to another source line");
+    check(oldFunction.identityKey == newFunction.identityKey,
+          "Body edits, shifted lines and declarator formatting must preserve identity");
+}
+
+void identityUsesLengthPrefixedUtf8Fields() {
+    const auto parsed = parseSuccessfully(source({{"src/код:main.cpp",
+        "namespace app { int f() { return 1; } }"}}));
+    const auto& function = functionNamed(parsed.units.front(), "f");
+    // The path has 19 UTF-8 bytes; app::f has 6. Colons are part of field values.
+    check(function.identityKey == "19:src/код:main.cpp6:app::f1:f1:(1:)",
+          "Key must length-prefix path, qualified name and each declarator token in UTF-8 bytes");
+}
+
+void identitiesDistinguishPathsScopesAndOverloads() {
+    const auto parsed = parseSuccessfully(source({
+        {"a.cpp", R"cpp(
+namespace left {
+int run(int value) { return value; }
+int run(double value) { return 0; }
+}
+namespace right { int run(int value) { return value; } }
+struct Box {
+    int get() { return 0; }
+    int get() const { return 0; }
+};
+)cpp"},
+        {"b.cpp", "namespace left { int run(int value) { return value; } }"}
+    }));
+    std::unordered_set<std::string> keys;
+    for (const auto& unit : parsed.units) {
+        // Check each source definition once, so duplicate index entries have their own test.
+        std::unordered_set<const FunctionEntity*> seen;
+        for (const auto& function : unit.functions) {
+            if (!seen.insert(function.get()).second) {
+                continue;
+            }
+            check(!function->identityKey.empty() && keys.insert(function->identityKey).second,
+                  "Different paths, owners, parameter types or const qualifiers need distinct keys");
+        }
+    }
+    check(keys.size() == 6, "Expected six distinct function identities");
+}
+
+void formattedNamespacePreservesIdentity() {
+    const auto compact = parseSuccessfully(source({{"namespace.cpp",
+        "namespace app::detail { int run() { return 1; } }"}}));
+    const auto formatted = parseSuccessfully(source({{"namespace.cpp",
+        "namespace app /* scope */ :: detail { int run() { return 1; } }"}}));
+    const auto& first = functionNamed(compact.units.front(), "run");
+    const auto& second = functionNamed(formatted.units.front(), "run");
+    check(first.ownerName == "app::detail" && second.ownerName == first.ownerName,
+          "Namespace names must exclude whitespace and comments around ::");
+    check(first.identityKey == second.identityKey,
+          "Formatting a nested namespace must not change a function identity");
+}
+
+void formattedTemplateOwnerPreservesIdentity() {
+    const auto compact = parseSuccessfully(source({{"owner.cpp",
+        "template<> int Box<int>::run() { return 1; }"}}));
+    const auto formatted = parseSuccessfully(source({{"owner.cpp",
+        "template <> int Box< int >::run() { return 1; }"}}));
+    const auto& first = functionNamed(compact.units.front(), "run");
+    const auto& second = functionNamed(formatted.units.front(), "run");
+    check(first.ownerName == "Box<int>" && second.ownerName == first.ownerName,
+          "Template owner names must be independent of spacing inside < >");
+    check(first.identityKey == second.identityKey,
+          "Formatting a template owner must not change a function identity");
+}
+
+void collectEntityIds(const CodeEntity& entity, std::vector<EntityId>& ids) {
+    ids.push_back(entity.id);
+    for (const auto& child : entity.children) {
+        check(child != nullptr, "Entity tree must not contain null children");
+        collectEntityIds(*child, ids);
+    }
+}
+
+void entityIdsAreUniqueAndRepeatable() {
+    const auto input = source({
+        {"a.cpp", "struct Outer { struct Inner { int run() { return 1; } }; };"},
+        {"empty.cpp", ""},
+        {"b.cpp", "struct Other { int run() { return 2; } }; int free() { return 0; }"}
+    });
+    const auto first = parseSuccessfully(input);
+    const auto second = parseSuccessfully(input);
+    std::vector<EntityId> firstIds;
+    std::vector<EntityId> secondIds;
+    for (const auto& unit : first.units) {
+        collectEntityIds(*unit.root, firstIds);
+        std::unordered_set<const FunctionEntity*> indexed;
+        for (const auto& function : unit.functions) {
+            check(indexed.insert(function.get()).second,
+                  "A function object must appear in the function index exactly once");
+            check(reachable(*unit.root, function.get()),
+                  "Indexed functions must share the entity IDs of the tree objects");
+        }
+    }
+    for (const auto& unit : second.units) {
+        collectEntityIds(*unit.root, secondIds);
+    }
+    std::unordered_set<EntityId> unique;
+    for (const auto& id : firstIds) {
+        check(!id.empty(), "Files, types and functions all need nonempty IDs");
+        check(unique.insert(id).second, "Entity IDs must be unique across the entire snapshot");
+    }
+    check(firstIds.size() == 9, "Expected three files, three types and three functions");
+    check(firstIds == secondIds,
+          "Parsing the same input twice must assign the same IDs in tree traversal order");
+}
+
+void duplicateKeysRetainSeparateEntities() {
+    // Tree-sitter parses syntax; duplicate semantic definitions are deliberately retained.
+    const auto parsed = parseSuccessfully(source({{"duplicates.cpp",
+        "int run() { return 1; }\nint run() { return 2; }"}}));
+    const auto& unit = parsed.units.front();
+    check(unit.functions.size() == 2 && unit.root->children.size() == 2,
+          "Each of two definitions must appear exactly once in the index and tree");
+    const auto& first = *unit.functions[0];
+    const auto& second = *unit.functions[1];
+    check(&first != &second && !first.id.empty() && !second.id.empty() && first.id != second.id,
+          "Duplicate keys must belong to separate entities with distinct IDs");
+    check(!first.identityKey.empty() && first.identityKey == second.identityKey,
+          "Duplicate identity keys must remain visible to the matching module");
+    check(first.range.startByte != second.range.startByte,
+          "Duplicate definitions must retain their own source ranges");
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -417,7 +586,16 @@ int main() {
         {"progress", progress},
         {"cancellation before start", cancellationBeforeStart},
         {"cancellation from progress", cancellationFromProgress},
-        {"cancellation retains diagnostics", cancellationKeepsDiagnostics}
+        {"cancellation retains diagnostics", cancellationKeepsDiagnostics},
+        {"declarator tokens ignore formatting", declaratorTokensIgnoreFormatting},
+        {"literal contents remain significant", literalContentsRemainSignificant},
+        {"identity ignores body edits and line shifts", identityIgnoresBodyAndLineShifts},
+        {"identity uses length-prefixed UTF-8 fields", identityUsesLengthPrefixedUtf8Fields},
+        {"identities distinguish paths, scopes and overloads", identitiesDistinguishPathsScopesAndOverloads},
+        {"formatted namespace preserves identity", formattedNamespacePreservesIdentity},
+        {"formatted template owner preserves identity", formattedTemplateOwnerPreservesIdentity},
+        {"entity IDs are unique and repeatable", entityIdsAreUniqueAndRepeatable},
+        {"duplicate keys retain separate entities", duplicateKeysRetainSeparateEntities}
     };
     int failures = 0;
     for (const auto& test : cases) {
