@@ -745,6 +745,94 @@ void controlTreeKeepsOriginalRanges() {
           "Expression ranges must remain usable after the Tree-sitter tree is destroyed");
 }
 
+void syntaxDiagnosticsHaveConcreteRanges() {
+    const std::string bytes = "\xEF\xBB\xBF// \xD0\xBA\xD0\xBE\xD0\xB4\r\n"
+        "void first() { @@@; }\r\n"
+        "void second() { @@@; }\r\n"
+        "int good() { return 2; }\r\n";
+    const auto parsed = parseSuccessfully(source({{"errors.cpp", bytes}}));
+    const auto& unit = parsed.units.front();
+    check(unit.diagnostics.size() >= 2,
+          "Both invalid fragments must have concrete syntax diagnostics");
+    check(unit.coverage.diagnostics.size() == unit.diagnostics.size() &&
+          parsed.coverage.diagnostics.size() == unit.diagnostics.size(),
+          "Concrete syntax errors must propagate to unit and snapshot coverage once");
+    check(unit.coverage.completeness == Completeness::partial &&
+          parsed.coverage.completeness == Completeness::partial &&
+          unit.root->parseState == Validity::unavailable,
+          "Concrete diagnostics must retain partial-result status");
+    check(unit.coverage.skippedElements == 0,
+          "Syntax diagnostics must not count retained functions as skipped elements");
+    const auto firstOffset = bytes.find("@@@");
+    const auto secondOffset = bytes.find("@@@", firstOffset + 3);
+    bool firstReported = false;
+    bool secondReported = false;
+    std::uint64_t previousStart = 0;
+    for (std::size_t index = 0; index < unit.diagnostics.size(); ++index) {
+        const auto& diagnostic = unit.diagnostics[index];
+        check(diagnostic.range.has_value(), "Every syntax error must have a concrete range");
+        check(diagnostic.relativePath == "errors.cpp" &&
+              diagnostic.error.path == "errors.cpp" &&
+              diagnostic.error.code == ErrorCode::parse_incomplete,
+              "Syntax diagnostics must preserve path and error code");
+        const auto& range = *diagnostic.range;
+        const bool inFirst = range.startByte >= firstOffset && range.endByte <= firstOffset + 3;
+        const bool inSecond = range.startByte >= secondOffset && range.endByte <= secondOffset + 3;
+        check((inFirst || inSecond) && range.startByte >= previousStart &&
+              textAt(bytes, range).find('@') != std::string_view::npos &&
+              range.startLine == (inFirst ? 2u : 3u) && range.endLine == range.startLine,
+              "Errors must be ordered and refer to original UTF-8/BOM/CRLF coordinates");
+        firstReported = firstReported || inFirst;
+        secondReported = secondReported || inSecond;
+        previousStart = range.startByte;
+        check(unit.coverage.diagnostics[index].message == diagnostic.error.message &&
+              parsed.coverage.diagnostics[index].message == diagnostic.error.message,
+              "Detailed and coverage diagnostics must describe the same error");
+    }
+    check(firstReported && secondReported, "Neither invalid fragment may be silently omitted");
+    check(functionNamed(unit, "first").validity == Validity::unavailable &&
+          functionNamed(unit, "second").validity == Validity::unavailable &&
+          functionNamed(unit, "good").validity == Validity::valid,
+          "Errors in two functions must not invalidate a separate correct function");
+}
+
+void missingSyntaxTokenHasPointRange() {
+    const std::string bytes =
+        "int broken() { return 1 }\n"
+        "int good() { return 2; }\n";
+    const auto parsed = parseSuccessfully(source({{"missing.cpp", bytes}}));
+    const auto& unit = parsed.units.front();
+    check(unit.diagnostics.size() == 1, "A missing semicolon must yield one diagnostic");
+    const auto& diagnostic = unit.diagnostics.front();
+    check(diagnostic.error.message == "Missing syntax token: ;" && diagnostic.range,
+          "Missing-token diagnostics must identify the expected punctuation token");
+    const auto& range = *diagnostic.range;
+    const auto expressionEnd = bytes.find("return 1") + std::string_view("return 1").size();
+    check(range.startByte == range.endByte && range.startByte >= expressionEnd &&
+          range.endByte <= bytes.find('}') && range.startLine == 1 && range.endLine == 1,
+          "A missing token must identify a zero-width insertion point before the closing brace");
+    check(textAt(bytes, range).empty(), "Missing tokens must not claim existing source bytes");
+    check(unit.coverage.diagnostics.size() == 1 && parsed.coverage.diagnostics.size() == 1 &&
+          parsed.coverage.completeness == Completeness::partial,
+          "Missing-token errors must propagate into partial coverage");
+    check(functionNamed(unit, "broken").validity == Validity::unavailable &&
+          functionNamed(unit, "good").validity == Validity::valid,
+          "A missing token must only invalidate the affected function");
+}
+
+void validSyntaxHasNoDiagnostics() {
+    const auto parsed = parseSuccessfully(source({{"valid.cpp",
+        "int good() { return 2; }\n"}}));
+    const auto& unit = parsed.units.front();
+    check(unit.diagnostics.empty() && unit.coverage.diagnostics.empty() &&
+          parsed.coverage.diagnostics.empty(),
+          "Valid syntax must not produce recovery diagnostics");
+    check(unit.coverage.completeness == Completeness::complete &&
+          parsed.coverage.completeness == Completeness::complete &&
+          unit.root->parseState == Validity::valid,
+          "Valid syntax must retain complete coverage and file status");
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -780,7 +868,10 @@ int main() {
         {"control tree loops and labels", controlTreeRecognizesLoopsAndLabels},
         {"control tree expressions through wrappers", controlTreeFindsExpressionsThroughWrappers},
         {"control tree inner-body boundaries", controlTreeExcludesInnerBodies},
-        {"control tree original ranges", controlTreeKeepsOriginalRanges}
+        {"control tree original ranges", controlTreeKeepsOriginalRanges},
+        {"syntax diagnostics have concrete ranges", syntaxDiagnosticsHaveConcreteRanges},
+        {"missing syntax token has a point range", missingSyntaxTokenHasPointRange},
+        {"valid syntax has no diagnostics", validSyntaxHasNoDiagnostics}
     };
     int failures = 0;
     for (const auto& test : cases) {
