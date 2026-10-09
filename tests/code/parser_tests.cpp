@@ -1085,6 +1085,55 @@ int ordinary();
           "Correct conditional declarations must retain complete syntactic coverage");
 }
 
+void functionTryBlockRetainsTryNode() {
+    const auto parsed = parseSuccessfully(source({{"function-try.cpp", R"cpp(
+int run(int value) try {
+    if (value) { return 1; }
+    return 0;
+} catch (...) {
+    return -1;
+}
+)cpp"}}));
+    const auto& function = functionNamed(parsed.units.front(), "run");
+    check(function.validity == Validity::valid, "A function try block is valid syntax");
+    const auto& tree = function.controlTree;
+    check(tree.children.size() == 2 &&
+          tree.children[0].kind == ControlKind::try_statement &&
+          tree.children[1].kind == ControlKind::catch_clause,
+          "A function try block must retain the try node with catch as its sibling");
+    check(countControlKind(tree.children[0], ControlKind::if_statement) == 1,
+          "Conditions in a function try block must remain nested under its try node");
+}
+
+void memberFunctionPointersAreNotDeclarations() {
+    const auto parsed = parseSuccessfully(source({{"member-pointers.cpp", R"cpp(
+struct Widget { void run(); };
+void (Widget::*callback)();
+)cpp"}}));
+    const auto& unit = parsed.units.front();
+    check(unit.functions.size() == 1 && unit.functions[0]->name == "run",
+          "Pointers to member functions must not appear as declared functions");
+    check(unit.diagnostics.empty() && unit.coverage.completeness == Completeness::complete,
+          "A member-function pointer supported by the grammar must not cause extraction errors");
+
+    // The pinned grammar recovers Widget:: as ERROR for this field declaration.
+    // Preserve that limitation rather than advertising a complete parse.
+    const auto recovered = parseSuccessfully(source({{"member-field.cpp", R"cpp(
+struct Widget { void run(); };
+struct Holder { void (Widget::*member)(); };
+)cpp"}}));
+    const auto& recoveredUnit = recovered.units.front();
+    check(recoveredUnit.functions.size() == 1 && recoveredUnit.functions[0]->name == "run",
+          "A recovered member-pointer field must not become a function entity");
+    check(!recoveredUnit.diagnostics.empty() &&
+          recovered.coverage.completeness == Completeness::partial,
+          "Grammar recovery must remain visible as partial coverage");
+    for (const auto& diagnostic : recoveredUnit.diagnostics) {
+        check(diagnostic.range && diagnostic.error.message == "Unrecognized syntax",
+              "The field's syntax-recovery error must not become an entity-extraction failure");
+    }
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -1133,7 +1182,9 @@ int main() {
         {"declarations have no applicable body", declarationsHaveNoApplicableBody},
         {"declarations distinguish functions from pointers", declarationsDistinguishFunctionsFromPointers},
         {"method declarations preserve type structure", methodDeclarationsPreserveTypeStructure},
-        {"conditional declarations remain not applicable", conditionalDeclarationsRemainNotApplicable}
+        {"conditional declarations remain not applicable", conditionalDeclarationsRemainNotApplicable},
+        {"function try block retains try node", functionTryBlockRetainsTryNode},
+        {"member function pointers are not declarations", memberFunctionPointersAreNotDeclarations}
     };
     int failures = 0;
     for (const auto& test : cases) {
