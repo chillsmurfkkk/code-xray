@@ -833,6 +833,62 @@ void validSyntaxHasNoDiagnostics() {
           "Valid syntax must retain complete coverage and file status");
 }
 
+void eligibilityUsesConcreteDiagnosticReasons() {
+    const auto parsed = parseSuccessfully(source({
+        {"affected.cpp", "int broken() { return 1 }int good() { return 2; }"},
+        {"separate.cpp", "int broken() { return 1; }"}
+    }));
+    const auto& affected = parsed.units[0];
+    const auto& broken = functionNamed(affected, "broken");
+    check(broken.validity == Validity::unavailable &&
+          broken.reason == "Missing syntax token: ;",
+          "A missing-token diagnostic must supply the affected function's concrete reason");
+    check(affected.diagnostics.size() == 1 &&
+          affected.diagnostics[0].error.message == broken.reason,
+          "Function eligibility must agree with the collected diagnostic");
+    const auto& good = functionNamed(affected, "good");
+    check(good.validity == Validity::valid && good.reason.empty(),
+          "A neighboring function must remain valid without inheriting another function's reason");
+    const auto& separate = functionNamed(parsed.units[1], "broken");
+    check(separate.validity == Validity::valid && separate.reason.empty() &&
+          parsed.units[1].coverage.completeness == Completeness::complete,
+          "Errors must not affect a same-named function at similar offsets in a different file");
+}
+
+void eligibilityExcludesErrorsBetweenFunctions() {
+    const auto parsed = parseSuccessfully(source({{"between.cpp",
+        "int before() { return 1; }@@@int after() { return 2; }"}}));
+    const auto& unit = parsed.units.front();
+    const auto& before = functionNamed(unit, "before");
+    const auto& after = functionNamed(unit, "after");
+    check(unit.coverage.completeness == Completeness::partial && !unit.diagnostics.empty(),
+          "Invalid file-level text must remain visible in coverage");
+    for (const auto& diagnostic : unit.diagnostics) {
+        check(diagnostic.range && diagnostic.range->startByte >= before.range.endByte &&
+              diagnostic.range->endByte <= after.range.startByte,
+              "The fixture's error ranges must lie between the two function ranges");
+    }
+    check(before.validity == Validity::valid && after.validity == Validity::valid &&
+          before.reason.empty() && after.reason.empty(),
+          "Nonempty errors touching function endpoints must not invalidate either function");
+}
+
+void eligibilityIncludesMissingClosingBraceAtEndpoint() {
+    const std::string bytes = "int unfinished() { return 1;";
+    const auto parsed = parseSuccessfully(source({{"unfinished.cpp", bytes}}));
+    const auto& unit = parsed.units.front();
+    const auto& function = functionNamed(unit, "unfinished");
+    check(unit.diagnostics.size() == 1 && unit.diagnostics[0].range,
+          "A missing closing brace must have a concrete diagnostic");
+    const auto& diagnostic = unit.diagnostics[0];
+    check(diagnostic.error.message == "Missing syntax token: }" &&
+          diagnostic.range->startByte == bytes.size() &&
+          diagnostic.range->endByte == bytes.size() && function.range.endByte == bytes.size(),
+          "The missing brace must be represented as an insertion point at the function endpoint");
+    check(function.validity == Validity::unavailable && function.reason == diagnostic.error.message,
+          "A missing token at the endpoint must make the function unavailable with a concrete reason");
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -871,7 +927,10 @@ int main() {
         {"control tree original ranges", controlTreeKeepsOriginalRanges},
         {"syntax diagnostics have concrete ranges", syntaxDiagnosticsHaveConcreteRanges},
         {"missing syntax token has a point range", missingSyntaxTokenHasPointRange},
-        {"valid syntax has no diagnostics", validSyntaxHasNoDiagnostics}
+        {"valid syntax has no diagnostics", validSyntaxHasNoDiagnostics},
+        {"eligibility uses concrete diagnostic reasons", eligibilityUsesConcreteDiagnosticReasons},
+        {"eligibility excludes errors between functions", eligibilityExcludesErrorsBetweenFunctions},
+        {"eligibility includes missing closing brace at endpoint", eligibilityIncludesMissingClosingBraceAtEndpoint}
     };
     int failures = 0;
     for (const auto& test : cases) {

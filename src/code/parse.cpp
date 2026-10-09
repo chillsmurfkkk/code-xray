@@ -368,6 +368,46 @@ bool collectParseDiagnostics(
     return !job.isCancelled();
 }
 
+void markAnalysisEligibility(
+    FunctionEntity& function,
+    const std::vector<ParseDiagnostic>& diagnostics
+)
+{
+    for (const auto& diagnostic : diagnostics) {
+        if (diagnostic.relativePath != function.relativePath || !diagnostic.range) {
+            continue;
+        }
+
+        const auto& problem = *diagnostic.range;
+        const auto& range = function.range;
+
+        bool intersects;
+
+        if (problem.startByte == problem.endByte) {
+            intersects = range.startByte <= problem.startByte &&
+                problem.startByte <= range.endByte;
+        } else {
+            intersects = problem.startByte < range.endByte &&
+                range.startByte < problem.endByte;
+        }
+
+        if (intersects) {
+            function.validity = Validity::unavailable;
+            function.reason = diagnostic.error.message;
+            return;
+        }
+    }
+
+    if (function.validity == Validity::unavailable) {
+        return;
+    }
+
+    if (!function.bodyRange) {
+        function.validity = Validity::not_applicable;
+        function.reason = "Function has no body";
+    }
+}
+
 std::optional<std::vector<std::string>> normalizeDeclarator(
     TSNode declarator,
     std::string_view source
@@ -822,6 +862,8 @@ bool walkStructure(
 
         auto function = std::get<std::shared_ptr<FunctionEntity>>(result);
         function->id = makeEntityId(nextId);
+
+        markAnalysisEligibility(*function, unit.diagnostics);
 
         parent.children.push_back(function);
         unit.functions.push_back(function);
