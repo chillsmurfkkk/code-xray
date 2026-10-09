@@ -538,7 +538,12 @@ TSNode findDeclaratorName(TSNode node) {
 }
 
 TSNode findDeclaredFunction(TSNode declarator) {
-    const auto name = findDeclaratorName(declarator);
+    auto name = findDeclaratorName(declarator);
+
+    while (!ts_node_is_null(name) &&
+           std::string_view(ts_node_type(name)) == "qualified_identifier") {
+        name = ts_node_child_by_field_name(name, "name", 4);
+    }
 
     if (ts_node_is_null(name)) {
         return {};
@@ -554,6 +559,7 @@ TSNode findDeclaredFunction(TSNode declarator) {
         }
 
         if (kind == "pointer_declarator" ||
+            kind == "pointer_type_declarator" ||
             kind == "reference_declarator" ||
             kind == "array_declarator") {
             return {};
@@ -812,12 +818,20 @@ Result<std::shared_ptr<FunctionEntity>> extractFunction(
         function->controlTree.kind = ControlKind::block;
         function->controlTree.range = *function->bodyRange;
 
-        const auto count = ts_node_named_child_count(body);
+        if (std::string_view(ts_node_type(body)) == "compound_statement") {
+            const auto count = ts_node_named_child_count(body);
 
-        for (std::uint32_t index = 0; index < count; ++index) {
-            const auto child = ts_node_named_child(body, index);
+            for (std::uint32_t index = 0; index < count; ++index) {
+                const auto child = ts_node_named_child(body, index);
 
-            if (!appendControlNodes(child, function->controlTree.children, job)) {
+                if (!appendControlNodes(
+                        child, function->controlTree.children, job)) {
+                    return Cancelled{};
+                }
+            }
+        } else {
+            if (!appendControlNodes(
+                    body, function->controlTree.children, job)) {
                 return Cancelled{};
             }
         }
