@@ -132,6 +132,181 @@ SourceRange nodeRange(TSNode node) {
     return range;
 }
 
+std::optional<ControlKind> controlKindFor(std::string_view nodeType) {
+    if (nodeType == "compound_statement") {
+        return ControlKind::block;
+    }
+    if (nodeType == "if_statement") {
+        return ControlKind::if_statement;
+    }
+    if (nodeType == "for_statement") {
+        return ControlKind::for_loop;
+    }
+    if (nodeType == "for_range_loop") {
+        return ControlKind::range_for;
+    }
+    if (nodeType == "while_statement") {
+        return ControlKind::while_loop;
+    }
+    if (nodeType == "do_statement") {
+        return ControlKind::do_loop;
+    }
+    if (nodeType == "switch_statement") {
+        return ControlKind::switch_statement;
+    }
+    if (nodeType == "try_statement") {
+        return ControlKind::try_statement;
+    }
+    if (nodeType == "catch_clause") {
+        return ControlKind::catch_clause;
+    }
+    if (nodeType == "conditional_expression") {
+        return ControlKind::conditional_expression;
+    }
+    if (nodeType == "lambda_expression") {
+        return ControlKind::lambda;
+    }
+    if (nodeType == "class_specifier" ||
+        nodeType == "struct_specifier" ||
+        nodeType == "union_specifier") {
+        return ControlKind::local_type;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<ControlKind> controlKindFor(TSNode node) {
+    if (ts_node_is_null(node)) {
+        return std::nullopt;
+    }
+
+    const std::string_view nodeType = ts_node_type(node);
+
+    if (nodeType == "if_statement") {
+        const auto parent = ts_node_parent(node);
+
+        if (!ts_node_is_null(parent) &&
+            std::string_view(ts_node_type(parent)) == "else_clause") {
+            return ControlKind::else_if;
+        }
+    }
+
+    if (nodeType == "case_statement") {
+        const auto count = ts_node_child_count(node);
+
+        for (std::uint32_t index = 0; index < count; ++index) {
+            const auto child = ts_node_child(node, index);
+            const std::string_view childType = ts_node_type(child);
+
+            if (childType == "case") {
+                return ControlKind::case_label;
+            }
+            if (childType == "default") {
+                return ControlKind::default_label;
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    return controlKindFor(nodeType);
+}
+
+bool appendControlNodes(
+    TSNode node,
+    std::vector<ControlNode>& destination,
+    const JobContext& job
+)
+{
+    if (job.isCancelled()) {
+        return false;
+    }
+
+    if (ts_node_is_null(node)) {
+        return true;
+    }
+
+    const auto kind = controlKindFor(node);
+
+    if (!kind) {
+        const auto count = ts_node_named_child_count(node);
+
+        for (std::uint32_t index = 0; index < count; ++index) {
+            const auto child = ts_node_named_child(node, index);
+
+            if (!appendControlNodes(child, destination, job)) {
+                return false;
+            }
+        }
+
+        return !job.isCancelled();
+    }
+
+    ControlNode control;
+    control.kind = *kind;
+    control.range = nodeRange(node);
+
+    std::vector<TSNode> siblings;
+
+    if (*kind != ControlKind::lambda && *kind != ControlKind::local_type) {
+        const auto count = ts_node_named_child_count(node);
+
+        for (std::uint32_t index = 0; index < count; ++index) {
+            const auto child = ts_node_named_child(node, index);
+            const std::string_view childType = ts_node_type(child);
+
+            if ((*kind == ControlKind::if_statement ||
+                *kind == ControlKind::else_if) &&
+                childType == "else_clause") {
+
+                TSNode elseIf{};
+
+                const auto alternativeCount = ts_node_named_child_count(child);
+
+                for (std::uint32_t alternativeIndex = 0;
+                    alternativeIndex < alternativeCount;
+                    ++alternativeIndex) {
+
+                    const auto alternative = ts_node_named_child(child, alternativeIndex);
+
+                    if (std::string_view(ts_node_type(alternative)) == "if_statement") {
+                        elseIf = alternative;
+                        break;
+                    }
+                }
+
+                if (!ts_node_is_null(elseIf)) {
+                    siblings.push_back(elseIf);
+                    continue;
+                }
+            }
+
+            if (*kind == ControlKind::try_statement && childType == "catch_clause") {
+                siblings.push_back(child);
+                continue;
+            }
+
+            if (!appendControlNodes(child, control.children, job)) {
+                return false;
+            }
+        }
+    }
+
+    if (job.isCancelled()) {
+        return false;
+    }
+
+    destination.push_back(std::move(control));
+
+    for (const auto sibling : siblings) {
+        if (!appendControlNodes(sibling, destination, job)) {
+            return false;
+        }
+    }
+
+    return !job.isCancelled();
+}
+
 std::optional<std::vector<std::string>> normalizeDeclarator(
     TSNode declarator,
     std::string_view source
@@ -372,7 +547,8 @@ EntityId makeEntityId(std::uint64_t& nextId) {
 Result<std::shared_ptr<FunctionEntity>> extractFunction(
     TSNode node,
     const SourceFile& file,
-    std::string_view lexicalScope
+    std::string_view lexicalScope,
+    const JobContext& job
 )
 {
     if (ts_node_is_null(node) ||
@@ -427,7 +603,18 @@ Result<std::shared_ptr<FunctionEntity>> extractFunction(
 
     if (!ts_node_is_null(body)) {
         function->bodyRange = nodeRange(body);
+        function->controlTree.kind = ControlKind::block;
         function->controlTree.range = *function->bodyRange;
+
+        const auto count = ts_node_named_child_count(body);
+
+        for (std::uint32_t index = 0; index < count; ++index) {
+            const auto child = ts_node_named_child(body, index);
+
+            if (!appendControlNodes(child, function->controlTree.children, job)) {
+                return Cancelled{};
+            }
+        }
     }
 
     if (ts_node_has_error(node)) {
@@ -561,7 +748,7 @@ bool walkStructure(
     }
 
     if (kind == "function_definition") {
-        auto result = extractFunction(node, file, scope);
+        auto result = extractFunction(node, file, scope, job);
 
         if (const auto* error = std::get_if<Error>(&result)) {
             recordFailure(*error);

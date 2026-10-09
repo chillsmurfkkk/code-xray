@@ -565,6 +565,186 @@ void duplicateKeysRetainSeparateEntities() {
           "Duplicate definitions must retain their own source ranges");
 }
 
+std::size_t countControlKind(const ControlNode& node, ControlKind kind) {
+    std::size_t count = node.kind == kind ? 1 : 0;
+    for (const auto& child : node.children) {
+        count += countControlKind(child, kind);
+    }
+    return count;
+}
+
+void controlTreePreservesBranchLevels() {
+    const auto parsed = parseSuccessfully(source({{"controls.cpp", R"cpp(
+void run(int value) {
+    if (value > 0) {
+        while (value > 1) { --value; }
+    } else /* comment */ if (value < 0) {
+        ++value;
+    } else if (value == 0) {
+        return;
+    } else {
+        if (value == 1) { return; }
+    }
+    try {
+        run(value);
+    } catch (int error) {
+        if (error) { return; }
+    } catch (...) {
+        return;
+    }
+}
+)cpp"}}));
+    const auto& function = functionNamed(parsed.units.front(), "run");
+    check(function.validity == Validity::valid, "Control fixture must parse without errors");
+    const auto& tree = function.controlTree;
+    check(tree.kind == ControlKind::block && tree.children.size() == 6,
+          "If, two else-if branches, try and two catches must share the root block");
+    const ControlKind expected[] = {
+        ControlKind::if_statement, ControlKind::else_if, ControlKind::else_if,
+        ControlKind::try_statement, ControlKind::catch_clause, ControlKind::catch_clause
+    };
+    for (std::size_t index = 0; index < tree.children.size(); ++index) {
+        check(tree.children[index].kind == expected[index],
+              "Sibling branches must preserve source order and kind");
+    }
+    const auto& first = tree.children[0];
+    check(first.children.size() == 1 && first.children[0].kind == ControlKind::block,
+          "The first if must retain its body block");
+    check(first.children[0].children.size() == 1 &&
+          first.children[0].children[0].kind == ControlKind::while_loop,
+          "The while must remain nested in the first branch");
+    const auto& lastBranch = tree.children[2];
+    check(lastBranch.children.size() == 2 &&
+          lastBranch.children[1].kind == ControlKind::block &&
+          lastBranch.children[1].children.size() == 1 &&
+          lastBranch.children[1].children[0].kind == ControlKind::if_statement,
+          "An if inside a braced else must remain nested, not become an else-if");
+    check(countControlKind(tree, ControlKind::else_if) == 2 &&
+          countControlKind(tree, ControlKind::if_statement) == 3 &&
+          countControlKind(tree, ControlKind::catch_clause) == 2,
+          "Deferred branches must appear exactly once");
+}
+
+void controlTreeRecognizesLoopsAndLabels() {
+    const auto parsed = parseSuccessfully(source({{"loops.cpp", R"cpp(
+void run(int value, int* values) {
+    for (int i = 0; i < value; ++i) {}
+    for (int item : values) {}
+    while (value) { --value; }
+    do { ++value; } while (value < 2);
+    switch (value) {
+        case 0: break;
+        case 1: if (value) { break; } break;
+        default: break;
+    }
+}
+)cpp"}}));
+    // The parser is syntactic: the range-for operand need not be semantically iterable.
+    const auto& function = functionNamed(parsed.units.front(), "run");
+    check(function.validity == Validity::valid, "Loop fixture must parse without errors");
+    const auto& tree = function.controlTree;
+    check(tree.children.size() == 5, "Each loop and switch must appear once at body level");
+    const ControlKind expected[] = {
+        ControlKind::for_loop, ControlKind::range_for, ControlKind::while_loop,
+        ControlKind::do_loop, ControlKind::switch_statement
+    };
+    for (std::size_t index = 0; index < tree.children.size(); ++index) {
+        check(tree.children[index].kind == expected[index], "Loop kinds must remain distinct");
+    }
+    const auto& switchNode = tree.children[4];
+    check(switchNode.children.size() == 1 &&
+          switchNode.children[0].kind == ControlKind::block,
+          "Switch must retain its body block");
+    const auto& labels = switchNode.children[0].children;
+    check(labels.size() == 3 && labels[0].kind == ControlKind::case_label &&
+          labels[1].kind == ControlKind::case_label &&
+          labels[2].kind == ControlKind::default_label,
+          "Case and default labels must be distinguished in source order");
+    check(countControlKind(labels[1], ControlKind::if_statement) == 1,
+          "A case must retain control statements inside it");
+}
+
+void controlTreeFindsExpressionsThroughWrappers() {
+    const auto parsed = parseSuccessfully(source({{"expressions.cpp", R"cpp(
+int choose(int value) {
+    int result = value ? 1 : 2;
+    consume(value ? 3 : 4);
+    if (value ? true : false) { result += 1; }
+    return value ? result : (result ? 5 : 6);
+}
+void empty() {}
+)cpp"}}));
+    const auto& unit = parsed.units.front();
+    const auto& tree = functionNamed(unit, "choose").controlTree;
+    check(tree.children.size() == 4 &&
+          tree.children[0].kind == ControlKind::conditional_expression &&
+          tree.children[1].kind == ControlKind::conditional_expression &&
+          tree.children[2].kind == ControlKind::if_statement &&
+          tree.children[3].kind == ControlKind::conditional_expression,
+          "Declarations, calls and returns must not hide conditional expressions");
+    check(countControlKind(tree, ControlKind::conditional_expression) == 5,
+          "Condition expressions and nested ternaries must all remain reachable");
+    check(countControlKind(tree.children[3], ControlKind::conditional_expression) == 2,
+          "A nested ternary must remain inside its outer expression");
+    const auto& empty = functionNamed(unit, "empty");
+    check(empty.controlTree.kind == ControlKind::block && empty.controlTree.children.empty(),
+          "An empty body must have one empty root, without a duplicate block");
+}
+
+void controlTreeExcludesInnerBodies() {
+    const auto parsed = parseSuccessfully(source({{"inner.cpp", R"cpp(
+void outer(int value) {
+    auto callback = [] { if (true) { while (true) {} } };
+    class Local { void method() { for (;;) { if (true) {} } } };
+    struct Other { void method() { do {} while (true); } };
+    union Storage { int number; double fraction; };
+    if (value) { return; }
+}
+)cpp"}}));
+    const auto& tree = functionNamed(parsed.units.front(), "outer").controlTree;
+    check(tree.children.size() == 5 && tree.children[0].kind == ControlKind::lambda &&
+          tree.children[1].kind == ControlKind::local_type &&
+          tree.children[2].kind == ControlKind::local_type &&
+          tree.children[3].kind == ControlKind::local_type &&
+          tree.children[4].kind == ControlKind::if_statement,
+          "Inner bodies must leave explicit boundaries in source order");
+    for (std::size_t index = 0; index < 4; ++index) {
+        check(tree.children[index].children.empty(), "Inner-body boundaries must be leaves");
+    }
+    check(countControlKind(tree, ControlKind::if_statement) == 1 &&
+          countControlKind(tree, ControlKind::while_loop) == 0 &&
+          countControlKind(tree, ControlKind::for_loop) == 0 &&
+          countControlKind(tree, ControlKind::do_loop) == 0,
+          "Inner-function control statements must not leak into the outer function");
+}
+
+void controlTreeKeepsOriginalRanges() {
+    const std::string bytes = "\xEF\xBB\xBF// \xD0\xBA\xD0\xBE\xD0\xB4\r\n"
+        "int run(int value) {\r\n"
+        "    if (value) { return value ? 1 : 2; }\r\n"
+        "    return 0;\r\n"
+        "}\r\n";
+    const auto parsed = parseSuccessfully(source({{"ranges.cpp", bytes}}));
+    const auto& function = functionNamed(parsed.units.front(), "run");
+    const auto& tree = function.controlTree;
+    check(function.bodyRange && tree.range.startByte == function.bodyRange->startByte &&
+          tree.range.endByte == function.bodyRange->endByte &&
+          tree.range.startLine == 2 && tree.range.endLine == 5,
+          "Root range must match the original function body, including CRLF coordinates");
+    check(tree.children.size() == 1, "Returns must not introduce control nodes");
+    const auto& branch = tree.children[0];
+    check(textAt(bytes, branch.range) == "if (value) { return value ? 1 : 2; }" &&
+          branch.range.startByte == bytes.find("if (value)") &&
+          branch.range.startLine == 3 && branch.range.endLine == 3,
+          "If offsets must refer to original bytes after BOM and multibyte text");
+    check(branch.children.size() == 1 && branch.children[0].children.size() == 1,
+          "The body block must retain its return expression");
+    const auto& expression = branch.children[0].children[0];
+    check(expression.kind == ControlKind::conditional_expression &&
+          textAt(bytes, expression.range) == "value ? 1 : 2",
+          "Expression ranges must remain usable after the Tree-sitter tree is destroyed");
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -595,7 +775,12 @@ int main() {
         {"formatted namespace preserves identity", formattedNamespacePreservesIdentity},
         {"formatted template owner preserves identity", formattedTemplateOwnerPreservesIdentity},
         {"entity IDs are unique and repeatable", entityIdsAreUniqueAndRepeatable},
-        {"duplicate keys retain separate entities", duplicateKeysRetainSeparateEntities}
+        {"duplicate keys retain separate entities", duplicateKeysRetainSeparateEntities},
+        {"control tree branch levels", controlTreePreservesBranchLevels},
+        {"control tree loops and labels", controlTreeRecognizesLoopsAndLabels},
+        {"control tree expressions through wrappers", controlTreeFindsExpressionsThroughWrappers},
+        {"control tree inner-body boundaries", controlTreeExcludesInnerBodies},
+        {"control tree original ranges", controlTreeKeepsOriginalRanges}
     };
     int failures = 0;
     for (const auto& test : cases) {
