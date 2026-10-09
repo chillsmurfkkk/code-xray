@@ -220,7 +220,11 @@ int Widget::run() { return 1; }
 int app::Widget::run() { return 2; }
 )cpp"}}));
     const auto& unit = parsed.units.front();
-    check(unit.functions.size() == 2, "Expected both out-of-class definitions");
+    check(unit.functions.size() == 3, "Expected the method declaration and both out-of-class definitions");
+    check(unit.functions[0]->validity == Validity::not_applicable && !unit.functions[0]->bodyRange &&
+          unit.functions[1]->validity == Validity::valid && unit.functions[1]->bodyRange &&
+          unit.functions[2]->validity == Validity::valid && unit.functions[2]->bodyRange,
+          "The in-class declaration must remain distinct from both usable definitions");
     for (const auto& function : unit.functions) {
         check(function->name == "run", "Qualification must be separated from the name");
         check(function->ownerName == "app::Widget",
@@ -979,6 +983,108 @@ int ordinary() { return 4; }
           "Syntax errors inside conditional branches must still make coverage partial");
 }
 
+void declarationsHaveNoApplicableBody() {
+    const std::string bytes = "int calculate(int value);\n"
+        "int first(), second(int), value;\n"
+        "int calculate(int value) { return value; }\n";
+    const auto parsed = parseSuccessfully(source({{"declarations.cpp", bytes}}));
+    const auto& unit = parsed.units.front();
+    check(unit.functions.size() == 4 && unit.root->children.size() == 4,
+          "Every function declarator must appear once, while ordinary variables are excluded");
+    for (std::size_t index = 0; index < 3; ++index) {
+        const auto& function = *unit.functions[index];
+        check(function.validity == Validity::not_applicable && !function.reason.empty() &&
+              !function.bodyRange && function.controlTree.children.empty(),
+              "Declarations must have no body or applicable metrics");
+        check(reachable(*unit.root, &function),
+              "Declarations in the function index must be the same entities stored in the outline");
+    }
+    check(unit.functions[0]->name == "calculate" && unit.functions[1]->name == "first" &&
+          unit.functions[2]->name == "second" && unit.functions[3]->name == "calculate",
+          "Multiple declarators must retain their own names and source order");
+    check(unit.functions[3]->validity == Validity::valid && unit.functions[3]->bodyRange,
+          "Definition extraction must still retain a usable function body");
+    check(unit.functions[0]->identityKey == unit.functions[3]->identityKey &&
+          unit.functions[0]->id != unit.functions[3]->id,
+          "Declaration and definition share an identity key but remain separate snapshot entities");
+    check(textAt(bytes, unit.functions[0]->range) == "int calculate(int value);",
+          "Declaration ranges must include the terminating semicolon");
+    check(unit.diagnostics.empty() && unit.coverage.completeness == Completeness::complete,
+          "Correct declarations must not make coverage partial");
+}
+
+void declarationsDistinguishFunctionsFromPointers() {
+    const auto parsed = parseSuccessfully(source({{"declarators.cpp", R"cpp(
+int* pointerResult(int);
+int& referenceResult();
+int (parenthesized)(int);
+int (*factory())(int);
+int (*callback)(int);
+int (&reference)(int);
+int (*callbacks[2])(int);
+int initialized = 1;
+)cpp"}}));
+    const auto& unit = parsed.units.front();
+    check(unit.functions.size() == 4,
+          "Only function declarations, not pointer/reference/array variables, belong in the index");
+    for (const auto name : {"pointerResult", "referenceResult", "parenthesized", "factory"}) {
+        check(functionNamed(unit, name).validity == Validity::not_applicable,
+              "Functions with wrapped declarators must remain recognizable declarations");
+    }
+    check(unit.diagnostics.empty(), "Valid declarator shapes must not generate diagnostics");
+}
+
+void methodDeclarationsPreserveTypeStructure() {
+    const auto parsed = parseSuccessfully(source({{"methods.hpp", R"cpp(
+namespace app {
+struct Widget {
+    Widget();
+    ~Widget();
+    void run() const;
+    virtual int value() = 0;
+    int operator+(int) const;
+    void (*callback)(int);
+    int count;
+} instance;
+}
+)cpp"}}));
+    const auto& unit = parsed.units.front();
+    check(unit.root->children.size() == 1 && unit.root->children[0]->kind == EntityKind::type,
+          "An inline type definition must still be extracted from a variable declaration");
+    const auto& type = *unit.root->children[0];
+    check(unit.functions.size() == 5 && type.children.size() == 5,
+          "Constructors, destructors, methods and operators must be retained without data members");
+    for (const auto& function : unit.functions) {
+        check(function->ownerName == "app::Widget" &&
+              function->validity == Validity::not_applicable && !function->bodyRange &&
+              reachable(type, function.get()),
+              "Method declarations must retain lexical ownership and the shared function index");
+    }
+    check(functionNamed(unit, "Widget").name == "Widget" &&
+          functionNamed(unit, "~Widget").name == "~Widget" &&
+          functionNamed(unit, "operator+").name == "operator+",
+          "Special method names must use the existing name extraction");
+    check(unit.diagnostics.empty(), "Valid method declarations must parse without diagnostics");
+}
+
+void conditionalDeclarationsRemainNotApplicable() {
+    const auto parsed = parseSuccessfully(source({{"conditional-declarations.hpp", R"cpp(
+#ifdef FEATURE
+int declared(int);
+template<class T> T convert(T value);
+#endif
+int ordinary();
+)cpp"}}));
+    const auto& unit = parsed.units.front();
+    check(unit.functions.size() == 3, "Conditional and template declarations must all be visible");
+    for (const auto& function : unit.functions) {
+        check(function->validity == Validity::not_applicable && !function->bodyRange,
+              "The absence of a body must outrank conditional precision for metric eligibility");
+    }
+    check(unit.diagnostics.empty() && parsed.coverage.completeness == Completeness::complete,
+          "Correct conditional declarations must retain complete syntactic coverage");
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -1023,7 +1129,11 @@ int main() {
         {"eligibility includes missing closing brace at endpoint", eligibilityIncludesMissingClosingBraceAtEndpoint},
         {"conditional ancestors mark all branches", conditionalAncestorsMarkAllBranches},
         {"conditional body preserves control tree", conditionalBodyPreservesControlTree},
-        {"conditional syntax errors remain unavailable", conditionalSyntaxErrorsRemainUnavailable}
+        {"conditional syntax errors remain unavailable", conditionalSyntaxErrorsRemainUnavailable},
+        {"declarations have no applicable body", declarationsHaveNoApplicableBody},
+        {"declarations distinguish functions from pointers", declarationsDistinguishFunctionsFromPointers},
+        {"method declarations preserve type structure", methodDeclarationsPreserveTypeStructure},
+        {"conditional declarations remain not applicable", conditionalDeclarationsRemainNotApplicable}
     };
     int failures = 0;
     for (const auto& test : cases) {

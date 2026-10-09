@@ -537,6 +537,38 @@ TSNode findDeclaratorName(TSNode node) {
     return {};
 }
 
+TSNode findDeclaredFunction(TSNode declarator) {
+    const auto name = findDeclaratorName(declarator);
+
+    if (ts_node_is_null(name)) {
+        return {};
+    }
+
+    auto current = name;
+
+    while (!ts_node_is_null(current)) {
+        const std::string_view kind = ts_node_type(current);
+
+        if (kind == "function_declarator") {
+            return current;
+        }
+
+        if (kind == "pointer_declarator" ||
+            kind == "reference_declarator" ||
+            kind == "array_declarator") {
+            return {};
+        }
+
+        if (ts_node_eq(current, declarator)) {
+            break;
+        }
+
+        current = ts_node_parent(current);
+    }
+
+    return {};
+}
+
 struct FunctionName {
     std::string name;
     std::string ownerName;
@@ -710,16 +742,28 @@ Result<bool> hasConditionalDescendant(
 
 Result<std::shared_ptr<FunctionEntity>> extractFunction(
     TSNode node,
+    TSNode declarator,
     const SourceFile& file,
     std::string_view lexicalScope,
     const JobContext& job
 )
 {
-    if (ts_node_is_null(node) ||
-        std::string_view(ts_node_type(node)) != "function_definition") {
+    if (ts_node_is_null(node) || ts_node_is_null(declarator)) {
         return Error{
             ErrorCode::invalid_input,
-            "Expected a function definition node",
+            "Expected a function definition node and declarator",
+            file.relativePath
+        };
+    }
+
+    const std::string_view kind = ts_node_type(node);
+
+    if (kind != "function_definition" &&
+        kind != "declaration" &&
+        kind != "field_declaration") {
+        return Error{
+            ErrorCode::invalid_input,
+            "Expected a function definition or declaration",
             file.relativePath
         };
     }
@@ -731,8 +775,6 @@ Result<std::shared_ptr<FunctionEntity>> extractFunction(
             file.relativePath
         };
     }
-
-    const auto declarator = ts_node_child_by_field_name(node, "declarator", 10);
 
     const auto nameNode = findDeclaratorName(declarator);
     const auto functionName = extractQualifiedName(nameNode, *file.bytes);
@@ -924,7 +966,8 @@ bool walkStructure(
     }
 
     if (kind == "function_definition") {
-        auto result = extractFunction(node, file, scope, job);
+        const auto declarator = ts_node_child_by_field_name(node, "declarator", 10);
+        auto result = extractFunction(node, declarator, file, scope, job);
 
         if (const auto* error = std::get_if<Error>(&result)) {
             recordFailure(*error);
@@ -943,6 +986,48 @@ bool walkStructure(
         parent.children.push_back(function);
         unit.functions.push_back(function);
         return true;
+    }
+
+    if (kind == "declaration" || kind == "field_declaration") {
+        const auto count = ts_node_child_count(node);
+
+        for (std::uint32_t index = 0; index < count; ++index) {
+            if (job.isCancelled()) {
+                return false;
+            }
+
+            const auto* field = ts_node_field_name_for_child(node, index);
+
+            if (!field || std::string_view(field) != "declarator") {
+                continue;
+            }
+
+            const auto declarator = ts_node_child(node, index);
+
+            if (ts_node_is_null(findDeclaredFunction(declarator))) {
+                continue;
+            }
+
+            auto result = extractFunction(node, declarator, file, scope, job);
+
+            if (const auto* error = std::get_if<Error>(&result)) {
+                recordFailure(*error);
+                continue;
+            }
+
+            if (std::holds_alternative<Cancelled>(result)) {
+                return false;
+            }
+
+            auto function = std::get<std::shared_ptr<FunctionEntity>>(result);
+
+            function->id = makeEntityId(nextId);
+
+            markAnalysisEligibility(*function, unit.diagnostics);
+
+            parent.children.push_back(function);
+            unit.functions.push_back(function);
+        }
     }
 
     if (kind == "class_specifier" ||
