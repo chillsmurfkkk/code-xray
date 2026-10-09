@@ -645,6 +645,69 @@ EntityId makeEntityId(std::uint64_t& nextId) {
     return "entity:" + std::to_string(nextId++);
 }
 
+bool hasConditionalAncestor(TSNode node) {
+    auto parent = ts_node_parent(node);
+
+    while (!ts_node_is_null(parent)) {
+        const std::string_view kind = ts_node_type(parent);
+
+        if (kind == "preproc_if" ||
+            kind == "preproc_ifdef" ||
+            kind == "preproc_elif" ||
+            kind == "preproc_elifdef" ||
+            kind == "preproc_else") {
+            return true;
+        }
+
+        parent = ts_node_parent(parent);
+    }
+
+    return false;
+}
+
+Result<bool> hasConditionalDescendant(
+    TSNode root,
+    const JobContext& job
+)
+{
+    std::vector<TSNode> pending{root};
+
+    while (!pending.empty()) {
+        if (job.isCancelled()) {
+            return Cancelled{};
+        }
+
+        const auto node = pending.back();
+        pending.pop_back();
+
+        if (ts_node_is_null(node)) {
+            continue;
+        }
+
+        const std::string_view kind = ts_node_type(node);
+
+        if (kind == "preproc_if" ||
+            kind == "preproc_ifdef" ||
+            kind == "preproc_elif" ||
+            kind == "preproc_elifdef" ||
+            kind == "preproc_else") {
+            return true;
+        }
+
+        const auto count = ts_node_named_child_count(node);
+
+        for (std::uint32_t index = count; index > 0; --index) {
+            pending.push_back(ts_node_named_child(node, index - 1));
+        }
+    }
+
+    if (job.isCancelled()) {
+        return Cancelled{};
+    }
+
+    return false;
+}
+
 Result<std::shared_ptr<FunctionEntity>> extractFunction(
     TSNode node,
     const SourceFile& file,
@@ -725,6 +788,18 @@ Result<std::shared_ptr<FunctionEntity>> extractFunction(
     else if (ts_node_is_null(body)) {
         function->validity = Validity::not_applicable;
         function->reason = "Function has no body";
+    }
+    else {
+        auto conditionalResult = hasConditionalDescendant(body, job);
+
+        if (std::holds_alternative<Cancelled>(conditionalResult)) {
+            return Cancelled{};
+        }
+
+        if (hasConditionalAncestor(node) || std::get<bool>(conditionalResult)) {
+            function->validity = Validity::syntactic_only;
+            function->reason = "Conditional compilation is not evaluated";
+        }
     }
 
     return function;

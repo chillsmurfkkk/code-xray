@@ -889,6 +889,96 @@ void eligibilityIncludesMissingClosingBraceAtEndpoint() {
           "A missing token at the endpoint must make the function unavailable with a concrete reason");
 }
 
+void conditionalAncestorsMarkAllBranches() {
+    const auto parsed = parseSuccessfully(source({{"conditional.cpp", R"cpp(
+#if 0
+namespace app {
+class Worker { public: void run() {} };
+}
+#elif OTHER
+void alternative() {}
+#else
+void fallback() {}
+#endif
+#ifdef FEATURE
+void enabled() {}
+#endif
+#ifndef DISABLED
+void defaultEnabled() {}
+#endif
+void ordinary() {}
+)cpp"}}));
+    const auto& unit = parsed.units.front();
+    check(unit.functions.size() == 6, "All syntactic branches must remain visible, including #if 0");
+    for (const auto name : {"run", "alternative", "fallback", "enabled", "defaultEnabled"}) {
+        const auto& function = functionNamed(unit, name);
+        check(function.validity == Validity::syntactic_only && !function.reason.empty(),
+              "Conditional ancestors must mark every branch, including methods inside namespaces and classes");
+    }
+    const auto& ordinary = functionNamed(unit, "ordinary");
+    check(ordinary.validity == Validity::valid && ordinary.reason.empty(),
+          "Conditional status must not leak past #endif");
+    check(unit.diagnostics.empty() && parsed.coverage.completeness == Completeness::complete,
+          "Unevaluated conditional compilation is a precision limitation, not a syntax failure");
+}
+
+void conditionalBodyPreservesControlTree() {
+    const auto parsed = parseSuccessfully(source({{"conditional-body.cpp", R"cpp(
+int choose(int value) {
+#if FEATURE
+    if (value) { return 1; }
+#elif OTHER
+    while (value) { --value; }
+#else
+    return value ? 2 : 3;
+#endif
+    return 0;
+}
+#define FEATURE 1
+#include "unused.hpp"
+int ordinary() { return 4; }
+)cpp"}}));
+    const auto& unit = parsed.units.front();
+    const auto& function = functionNamed(unit, "choose");
+    check(function.validity == Validity::syntactic_only && !function.reason.empty(),
+          "A conditional inside the body must mark a function with no conditional ancestors");
+    check(countControlKind(function.controlTree, ControlKind::if_statement) == 1 &&
+          countControlKind(function.controlTree, ControlKind::while_loop) == 1 &&
+          countControlKind(function.controlTree, ControlKind::conditional_expression) == 1,
+          "The syntactic tree must retain control constructs from all unevaluated branches");
+    check(functionNamed(unit, "ordinary").validity == Validity::valid,
+          "Unrelated #define and #include directives must not mark ordinary functions as conditional");
+    check(unit.diagnostics.empty() && unit.coverage.completeness == Completeness::complete,
+          "A valid conditional body must retain complete syntactic coverage");
+}
+
+void conditionalSyntaxErrorsRemainUnavailable() {
+    const auto parsed = parseSuccessfully(source({{"conditional-errors.cpp", R"cpp(
+#ifdef FEATURE
+int broken() { return 1 }
+int good() { return 2; }
+#endif
+int brokenInside() {
+#if FEATURE
+    return 3
+#endif
+}
+int ordinary() { return 4; }
+)cpp"}}));
+    const auto& unit = parsed.units.front();
+    for (const auto name : {"broken", "brokenInside"}) {
+        const auto& function = functionNamed(unit, name);
+        check(function.validity == Validity::unavailable &&
+              function.reason == "Missing syntax token: ;",
+              "Syntax errors must outrank conditional precision and retain their concrete reason");
+    }
+    check(functionNamed(unit, "good").validity == Validity::syntactic_only &&
+          functionNamed(unit, "ordinary").validity == Validity::valid,
+          "Neighboring conditional and ordinary functions must retain their own eligibility");
+    check(parsed.coverage.completeness == Completeness::partial,
+          "Syntax errors inside conditional branches must still make coverage partial");
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -930,7 +1020,10 @@ int main() {
         {"valid syntax has no diagnostics", validSyntaxHasNoDiagnostics},
         {"eligibility uses concrete diagnostic reasons", eligibilityUsesConcreteDiagnosticReasons},
         {"eligibility excludes errors between functions", eligibilityExcludesErrorsBetweenFunctions},
-        {"eligibility includes missing closing brace at endpoint", eligibilityIncludesMissingClosingBraceAtEndpoint}
+        {"eligibility includes missing closing brace at endpoint", eligibilityIncludesMissingClosingBraceAtEndpoint},
+        {"conditional ancestors mark all branches", conditionalAncestorsMarkAllBranches},
+        {"conditional body preserves control tree", conditionalBodyPreservesControlTree},
+        {"conditional syntax errors remain unavailable", conditionalSyntaxErrorsRemainUnavailable}
     };
     int failures = 0;
     for (const auto& test : cases) {
