@@ -3,6 +3,7 @@
 #include "common/job.hpp"
 #include "common/result.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <ios>
 #include <tree_sitter/api.h>
@@ -301,6 +302,66 @@ bool appendControlNodes(
     for (const auto sibling : siblings) {
         if (!appendControlNodes(sibling, destination, job)) {
             return false;
+        }
+    }
+
+    return !job.isCancelled();
+}
+
+bool collectParseDiagnostics(
+    TSNode root,
+    const SourceFile& file,
+    ParsedUnit& unit,
+    const JobContext& job
+)
+{
+    std::vector<TSNode> pending{root};
+
+    while (!pending.empty()) {
+        if(job.isCancelled()) {
+            return false;
+        }
+
+        const auto node = pending.back();
+        pending.pop_back();
+
+        if (ts_node_is_null(node)) {
+            continue;
+        }
+
+        const bool missing = ts_node_is_missing(node);
+        const bool errorNode = ts_node_is_error(node);
+
+        if (missing || errorNode) {
+            std::string message;
+
+            if (missing) {
+                message = "Missing syntax token: ";
+                message += ts_node_type(node);
+            } else {
+                message = "Unrecognized syntax";
+            }
+
+            Error error{
+                ErrorCode::parse_incomplete,
+                std::move(message),
+                file.relativePath
+            };
+
+            unit.diagnostics.push_back(ParseDiagnostic{
+                file.relativePath,
+                nodeRange(node),
+                error
+            });
+
+            unit.coverage.diagnostics.push_back(std::move(error));
+            unit.coverage.completeness = Completeness::partial;
+        }
+
+        const auto count = ts_node_child_count(node);
+
+        for (std::uint32_t index = count; index > 0; --index) {
+            pending.push_back(ts_node_child(node, index-1));
         }
     }
 
@@ -847,14 +908,10 @@ Result<ParsedUnit> parseUnit(
     root->range.endByte = file.bytes->size();
 
     if (ts_node_has_error(rootNode)) {
-        Error error{
-            ErrorCode::parse_incomplete,
-            "Source file contains syntax errors",
-            file.relativePath
-        };
+        if (!collectParseDiagnostics(rootNode, file, unit, job)) {
+            return Cancelled{unit.coverage.diagnostics};
+        }
 
-        unit.diagnostics.push_back(ParseDiagnostic{file.relativePath, std::nullopt, error});
-        unit.coverage.diagnostics.push_back(error);
         unit.coverage.completeness = Completeness::partial;
     }
 
