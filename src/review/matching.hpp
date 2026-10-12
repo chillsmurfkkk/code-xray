@@ -99,12 +99,37 @@ std::optional<T> toOptionalMetric(const T& val) {
     return val;
 }
 
+// D03 — indexEntities: індексація за ключем, групування унікальних і неоднозначних списків індексів
+template <typename TEntity, typename KeyFn>
+auto indexEntities(const std::vector<TEntity>& entities, KeyFn keyFn) {
+    using KeyType = std::invoke_result_t<KeyFn, const TEntity&>;
+    std::unordered_map<KeyType, std::vector<std::size_t>> index;
+    for (std::size_t i = 0; i < entities.size(); ++i) {
+        index[keyFn(entities[i])].push_back(i);
+    }
+    return index;
+}
+
+// D05 — classifyUnmatched: класифікація незіставленої сутності залежно від повноти протилежного аналізу
+inline MatchKind classifyUnmatched(bool isTarget, Completeness oppositeCompleteness) {
+    if (oppositeCompleteness == Completeness::complete) {
+        return isTarget ? MatchKind::added : MatchKind::removed;
+    }
+    return MatchKind::unmatched;
+}
+
 template <typename T>
 std::optional<T> computeMetricDelta(const std::optional<T>& before, const std::optional<T>& after) {
     if (before.has_value() && after.has_value()) {
         return *after - *before;
     }
     return std::nullopt;
+}
+
+// D07 — compareMetricValues: обчислення дельти метрик after - before
+template <typename T>
+std::optional<T> compareMetricValues(const std::optional<T>& before, const std::optional<T>& after) {
+    return computeMetricDelta(before, after);
 }
 
 template <typename KeyType, typename MetricType>
@@ -148,9 +173,7 @@ auto matchEntities(const std::vector<TEntity>& base,
 
     for (std::size_t idx : joinRes.unmatchedLeft) {
         auto beforeVal = toOptionalMetric(metricFn(base[idx]));
-        MatchKind kind = (targetCompleteness == xray::Completeness::complete)
-            ? MatchKind::removed
-            : MatchKind::unmatched;
+        MatchKind kind = classifyUnmatched(/*isTarget=*/false, targetCompleteness);
         results.push_back({
             keyFn(base[idx]),
             kind,
@@ -163,9 +186,7 @@ auto matchEntities(const std::vector<TEntity>& base,
 
     for (std::size_t idx : joinRes.unmatchedRight) {
         auto afterVal = toOptionalMetric(metricFn(target[idx]));
-        MatchKind kind = (baseCompleteness == xray::Completeness::complete)
-            ? MatchKind::added
-            : MatchKind::unmatched;
+        MatchKind kind = classifyUnmatched(/*isTarget=*/true, baseCompleteness);
         results.push_back({
             keyFn(target[idx]),
             kind,

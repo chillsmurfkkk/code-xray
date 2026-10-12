@@ -255,12 +255,26 @@ std::vector<ReviewItem> filterReviewItems(
                 }
             }
             if (hasUnknownFinding) continue;
-            // 4. Приховуємо елементи з недоступними метриками
+            // 4. Приховуємо елементи з недоступними метриками (з урахуванням kind)
             bool hasUnavailableMetric = false;
             for (const auto& m : item.metrics) {
-                if (!m.delta.has_value() && (!m.before.has_value() || !m.after.has_value())) {
-                    hasUnavailableMetric = true;
-                    break;
+                if (item.kind == ReviewKind::changed || item.kind == ReviewKind::unchanged) {
+                    if (!m.delta.has_value() || !m.before.has_value() || !m.after.has_value()) {
+                        hasUnavailableMetric = true;
+                        break;
+                    }
+                } else if (item.kind == ReviewKind::added) {
+                    // Для доданих відсутність before та delta є очікуваною
+                    if (!m.after.has_value()) {
+                        hasUnavailableMetric = true;
+                        break;
+                    }
+                } else if (item.kind == ReviewKind::removed) {
+                    // Для видалених відсутність after та delta є очікуваною
+                    if (!m.before.has_value()) {
+                        hasUnavailableMetric = true;
+                        break;
+                    }
                 }
             }
             if (hasUnavailableMetric) continue;
