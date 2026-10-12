@@ -784,14 +784,8 @@ Result<ComparisonReport> compare(
     return report;
 }
 
+// exportReport — заглушка для PR4 (буде реалізовано в exporter.cpp)
 // ─────────────────────────────────────────────────────────────
-// buildTrend та exportReport — заглушки для PR3 та PR4
-// ─────────────────────────────────────────────────────────────
-Result<TrendReport> buildTrend(const OrderedAnalyses&, const TrendOptions&, const JobContext&)
-{
-    return Error{ErrorCode::unsupported_encoding, "buildTrend: scheduled for next PR."};
-}
-
 Result<ExportReceipt> exportReport(const ComparisonReport&, const ExportOptions&, const JobContext&)
 {
     return Error{ErrorCode::unsupported_encoding, "exportReport: scheduled for next PR."};
