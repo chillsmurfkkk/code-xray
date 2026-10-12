@@ -681,6 +681,93 @@ static void test_probe_filter_show_unknown_completely_removes_ambiguous_and_inco
     std::cout << "  [OK] probe P2: showUnknown=false completely removes ambiguous and incomplete items\n";
 }
 
+static void test_probe_filter_keeps_exact_added_and_removed()
+{
+    // P2: compare -> filterReviewItems(showUnknown=false) НЕ повинен відкидати коректні додавання й видалення!
+    auto base = makeSnap("b", "fp-add-rem");
+    auto target = makeSnap("t", "fp-add-rem");
+
+    auto makeFn = [](const std::string& id, const std::string& key) {
+        auto fn = std::make_shared<code::FunctionEntity>();
+        fn->id = id;
+        fn->identityKey = key;
+        fn->relativePath = "service.cpp";
+        fn->range = {0, 50, 1, 5};
+        return fn;
+    };
+
+    // base має "oldFunc" (видалена), target має "newFunc" (додана)
+    auto bp = std::make_shared<code::ParsedSnapshot>();
+    bp->source = base->parsed->source;
+    code::ParsedUnit bu;
+    bu.functions.push_back(makeFn("fn_old", "oldFunc"));
+    bp->units.push_back(bu);
+    base->parsed = bp;
+    base->metrics.push_back(metric("fn_old", analysis::MetricId::function_lines, 20));
+
+    auto tp = std::make_shared<code::ParsedSnapshot>();
+    tp->source = target->parsed->source;
+    code::ParsedUnit tu;
+    tu.functions.push_back(makeFn("fn_new", "newFunc"));
+    tp->units.push_back(tu);
+    target->parsed = tp;
+    target->metrics.push_back(metric("fn_new", analysis::MetricId::function_lines, 30));
+
+    JobContext ctx;
+    auto res = compare(base, target, {}, ctx);
+    assert(std::holds_alternative<ComparisonReport>(res));
+    const auto& rpt = std::get<ComparisonReport>(res);
+
+    assert(rpt.items.size() == 2);
+
+    // Фільтруємо з showUnknown = false
+    auto filtered = filterReviewItems(rpt.items, "", "", std::nullopt, /*showUnknown=*/false);
+
+    // Обидва елементи мають залишитися!
+    assert(filtered.size() == 2);
+    bool foundAdded = false, foundRemoved = false;
+    for (const auto& it : filtered) {
+        if (it.kind == ReviewKind::added && it.confidence == Confidence::exact) foundAdded = true;
+        if (it.kind == ReviewKind::removed && it.confidence == Confidence::exact) foundRemoved = true;
+    }
+    assert(foundAdded);
+    assert(foundRemoved);
+
+    std::cout << "  [OK] probe P2: compare -> filter(showUnknown=false) keeps exact added and removed items\n";
+}
+
+static void test_indexEntities()
+{
+    // D03: indexEntities
+    std::vector<std::string> names = {"alpha", "beta", "alpha", "gamma"};
+    auto idx = indexEntities(names, [](const std::string& s) { return s; });
+    assert(idx["alpha"].size() == 2);
+    assert(idx["beta"].size() == 1);
+    assert(idx["gamma"].size() == 1);
+    std::cout << "  [OK] D03: indexEntities works correctly\n";
+}
+
+static void test_classifyUnmatched()
+{
+    // D05: classifyUnmatched
+    assert(classifyUnmatched(true, Completeness::complete) == MatchKind::added);
+    assert(classifyUnmatched(false, Completeness::complete) == MatchKind::removed);
+    assert(classifyUnmatched(true, Completeness::partial) == MatchKind::unmatched);
+    assert(classifyUnmatched(false, Completeness::partial) == MatchKind::unmatched);
+    std::cout << "  [OK] D05: classifyUnmatched works correctly\n";
+}
+
+static void test_compareMetricValues()
+{
+    // D07: compareMetricValues
+    assert(compareMetricValues<int>(10, 25).value() == 15);
+    assert(compareMetricValues<int>(25, 10).value() == -15);
+    assert(!compareMetricValues<int>(std::nullopt, 25).has_value());
+    assert(!compareMetricValues<int>(10, std::nullopt).has_value());
+    assert(!compareMetricValues<int>(std::nullopt, std::nullopt).has_value());
+    std::cout << "  [OK] D07: compareMetricValues works correctly\n";
+}
+
 // ─── main ───────────────────────────────────────────────────
 
 int main()
@@ -722,6 +809,10 @@ int main()
     test_probe_syntactic_only_caveat();
     test_probe_missing_snapshots_return_invalid_input();
     test_probe_filter_show_unknown_completely_removes_ambiguous_and_incomplete();
+    test_probe_filter_keeps_exact_added_and_removed();
+    test_indexEntities();
+    test_classifyUnmatched();
+    test_compareMetricValues();
 
     std::cout << "\nAll PR2 compare_tests PASSED 100%!\n";
     return 0;
