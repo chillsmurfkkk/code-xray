@@ -31,13 +31,21 @@ target_link_libraries(xray_analysis INTERFACE xray_code)
 add_library(xray_history INTERFACE)
 target_link_libraries(xray_history INTERFACE xray_code)
 
-add_library(xray_review INTERFACE)
-target_link_libraries(xray_review INTERFACE xray_analysis)
+add_library(xray_review STATIC
+    src/review/compare.cpp
+    src/review/trend.cpp
+    src/review/exporter.cpp
+)
+target_link_libraries(xray_review PUBLIC xray_analysis)
 
 if(BUILD_TESTING)
     add_executable(review_tests tests/review/review_tests.cpp)
     target_link_libraries(review_tests PRIVATE xray_review)
     add_test(NAME review COMMAND review_tests)
+
+    add_executable(compare_tests tests/review/compare_tests.cpp)
+    target_link_libraries(compare_tests PRIVATE xray_review)
+    add_test(NAME compare COMMAND compare_tests)
     add_executable(history_test tests/history_test.cpp)
     target_link_libraries(history_test PRIVATE xray_history)
     add_test(NAME history_test COMMAND history_test)
