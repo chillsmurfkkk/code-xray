@@ -33,6 +33,7 @@ target_link_libraries(xray_history INTERFACE xray_code)
 
 add_library(xray_review STATIC
     src/review/compare.cpp
+    src/review/trend.cpp
 )
 target_link_libraries(xray_review PUBLIC xray_analysis)
 
@@ -44,6 +45,10 @@ if(BUILD_TESTING)
     add_executable(compare_tests tests/review/compare_tests.cpp)
     target_link_libraries(compare_tests PRIVATE xray_review)
     add_test(NAME compare COMMAND compare_tests)
+
+    add_executable(trend_tests tests/review/trend_tests.cpp)
+    target_link_libraries(trend_tests PRIVATE xray_review)
+    add_test(NAME trend COMMAND trend_tests)
     add_executable(history_test tests/history_test.cpp)
     target_link_libraries(history_test PRIVATE xray_history)
     add_test(NAME history_test COMMAND history_test)

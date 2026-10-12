@@ -17,5 +17,8 @@
 | D13 | 1 | D (Ковальчук) | Функція | `src/review/compare.cpp::xray::review::groupReviewItems` | Реалізовано | `tests/review/compare_tests.cpp::test_group_sorts_by_path_then_kind` |
 | D14 | 1 | D (Ковальчук) | Функція | `src/review/compare.cpp::xray::review::filterReviewItems` | Реалізовано | `tests/review/compare_tests.cpp::test_filter_*` |
 | D15 | 1 | D (Ковальчук) | Функція | `src/review/compare.cpp::xray::review::rankReviewItems` | Реалізовано | `tests/review/compare_tests.cpp::test_rank_by_metric_delta` |
+| D16 | 1 | D (Ковальчук) | Функція | `src/review/trend.cpp::xray::review::buildTrend` | Реалізовано | `tests/review/trend_tests.cpp::test_buildTrend_*` |
+| D17 | 1 | D (Ковальчук) | Функція | `src/review/trend.cpp::xray::review::extractTrendPoint` | Реалізовано | `tests/review/trend_tests.cpp::test_extractTrendPoint_*` |
+| D18 | 1 | D (Ковальчук) | Функція | `src/review/trend.cpp::xray::review::splitTrendSegments` | Реалізовано | `tests/review/trend_tests.cpp::test_splitTrendSegments` |
 | D19 | 1 | D (Ковальчук) | Функція | `src/review/compare.cpp::xray::review::makeReviewExplanation` | Реалізовано | `tests/review/compare_tests.cpp` |
 | D25 | 1 | D (Ковальчук) | Функція | `src/review/compare.cpp::xray::review::validateComparisonReport` | Реалізовано | `tests/review/compare_tests.cpp::test_validate_*` |
