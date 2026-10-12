@@ -1,4 +1,5 @@
 #include "code/api.hpp"
+#include "code/search.hpp"
 #include "code/walk.hpp"
 
 #include <cstddef>
@@ -1253,6 +1254,120 @@ void walkHandlesLeafAndNullChildren() {
           "Null children must be skipped without hiding valid siblings");
 }
 
+ParsedSnapshot searchFixture() {
+    return parseSuccessfully(source({{"sample.cpp", R"cpp(
+struct runner {
+    void running() {}
+    void run() {}
+    struct Inner { void run() {} };
+};
+void rerun() {}
+void run() {}
+void Run() {}
+)cpp"}}));
+}
+
+void checkSearchMatches(
+    const std::vector<SearchMatch>& actual,
+    std::initializer_list<std::pair<EntityId, bool>> expected
+) {
+    check(actual.size() == expected.size(), "Search must return exactly the expected matches");
+    std::size_t index = 0;
+    for (const auto& [id, exact] : expected) {
+        check(actual[index].entityId == id, "Search must preserve expected ranking and entity identity");
+        check(actual[index].exact == exact, "Search must distinguish exact and partial matches");
+        ++index;
+    }
+}
+
+void searchRanksExactMatchesStably() {
+    const auto parsed = searchFixture();
+    const auto& unit = parsed.units.front();
+    const auto& functions = unit.functions;
+    const auto matches = searchEntities(*unit.root, SearchQuery{"run", std::nullopt});
+
+    checkSearchMatches(matches, {
+        {functions[1]->id, true},
+        {functions[2]->id, true},
+        {functions[4]->id, true},
+        {unit.root->children[0]->id, false},
+        {functions[0]->id, false},
+        {functions[3]->id, false}
+    });
+}
+
+void searchKindFilterStillVisitsNestedFunctions() {
+    const auto parsed = searchFixture();
+    const auto& unit = parsed.units.front();
+    const auto& functions = unit.functions;
+    const auto matches = searchEntities(*unit.root, SearchQuery{"run", EntityKind::function});
+
+    checkSearchMatches(matches, {
+        {functions[1]->id, true},
+        {functions[2]->id, true},
+        {functions[4]->id, true},
+        {functions[0]->id, false},
+        {functions[3]->id, false}
+    });
+}
+
+void searchEmptyQueryPreservesTreeOrder() {
+    const auto parsed = searchFixture();
+    const auto& unit = parsed.units.front();
+    const auto& functions = unit.functions;
+    const auto& type = unit.root->children[0];
+    const auto& inner = type->children[2];
+
+    checkSearchMatches(searchEntities(*unit.root, SearchQuery{}), {
+        {unit.root->id, false},
+        {type->id, false},
+        {functions[0]->id, false},
+        {functions[1]->id, false},
+        {inner->id, false},
+        {functions[2]->id, false},
+        {functions[3]->id, false},
+        {functions[4]->id, false},
+        {functions[5]->id, false}
+    });
+    checkSearchMatches(searchEntities(*unit.root, SearchQuery{"", EntityKind::type}), {
+        {type->id, false}, {inner->id, false}
+    });
+    checkSearchMatches(searchEntities(*unit.root, SearchQuery{"sample.cpp", EntityKind::file}), {
+        {unit.root->id, true}
+    });
+}
+
+void searchIsCaseSensitiveAndHandlesNoMatches() {
+    const auto parsed = searchFixture();
+    const auto& unit = parsed.units.front();
+
+    checkSearchMatches(searchEntities(*unit.root, SearchQuery{"Run", EntityKind::function}), {
+        {unit.functions[5]->id, true}
+    });
+    checkSearchMatches(searchEntities(*unit.root, SearchQuery{"run", EntityKind::type}), {
+        {unit.root->children[0]->id, false}
+    });
+    check(searchEntities(*unit.root, SearchQuery{"RUN", std::nullopt}).empty(),
+          "Search must not silently ignore letter case");
+    check(searchEntities(*unit.root, SearchQuery{"missing", std::nullopt}).empty(),
+          "A missing name must return an empty result");
+    check(searchEntities(*unit.root, SearchQuery{"run", EntityKind::file}).empty(),
+          "A name match must not bypass the kind filter");
+}
+
+void searchResultsOwnTheirIds() {
+    std::vector<SearchMatch> matches;
+    EntityId expectedId;
+    {
+        const auto parsed = searchFixture();
+        const auto& root = *parsed.units.front().root;
+        expectedId = root.id;
+        matches = searchEntities(root, SearchQuery{"sample.cpp", EntityKind::file});
+    }
+
+    checkSearchMatches(matches, {{expectedId, true}});
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -1261,6 +1376,11 @@ struct TestCase {
 
 int main() {
     const TestCase cases[] = {
+        {"search ranks exact matches stably", searchRanksExactMatchesStably},
+        {"search kind filter visits nested functions", searchKindFilterStillVisitsNestedFunctions},
+        {"search empty query preserves tree order", searchEmptyQueryPreservesTreeOrder},
+        {"search is case sensitive and handles no matches", searchIsCaseSensitiveAndHandlesNoMatches},
+        {"search results own their IDs", searchResultsOwnTheirIds},
         {"walk preserves order and parents", walkPreservesOrderAndParents},
         {"walk skips only selected subtree", walkSkipsOnlySelectedSubtree},
         {"walk skips root children", walkCanSkipRootChildren},
