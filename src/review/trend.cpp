@@ -30,7 +30,7 @@ TrendPoint extractTrendPoint(const analysis::AnalysisSnapshot& snapshot, const T
 
     if (options.aggregation == TrendAggregation::function) {
         // Пошук конкретної функції
-        const code::FunctionEntity* targetFn = nullptr;
+        std::vector<const code::FunctionEntity*> matchingFns;
         if (snapshot.parsed) {
             for (const auto& unit : snapshot.parsed->units) {
                 if (!options.relativePath.empty() && unit.relativePath != options.relativePath) {
@@ -38,15 +38,13 @@ TrendPoint extractTrendPoint(const analysis::AnalysisSnapshot& snapshot, const T
                 }
                 for (const auto& fn : unit.functions) {
                     if (fn && fn->identityKey == options.entityKey) {
-                        targetFn = fn.get();
-                        break;
+                        matchingFns.push_back(fn.get());
                     }
                 }
-                if (targetFn) break;
             }
         }
 
-        if (!targetFn) {
+        if (matchingFns.empty()) {
             pt.validFunctions = 0;
             pt.unknownFunctions = 1;
             pt.value = std::nullopt;
@@ -54,13 +52,28 @@ TrendPoint extractTrendPoint(const analysis::AnalysisSnapshot& snapshot, const T
             return pt;
         }
 
+        if (matchingFns.size() > 1) {
+            // [P2] За E0 неоднозначність (дублікати ключів) має давати nullopt із поясненням
+            pt.validFunctions = 0;
+            pt.unknownFunctions = matchingFns.size();
+            pt.value = std::nullopt;
+            pt.reason = "Ambiguous function: found " + std::to_string(matchingFns.size()) +
+                        " functions matching key '" + options.entityKey + "'";
+            return pt;
+        }
+
+        const auto* targetFn = matchingFns.front();
         auto it = metricMap.find(targetFn->id);
         if (it != metricMap.end() && it->second->value.has_value() &&
-            it->second->validity == code::Validity::valid) {
+            (it->second->validity == code::Validity::valid || it->second->validity == code::Validity::syntactic_only)) {
             pt.validFunctions = 1;
             pt.unknownFunctions = 0;
             pt.value = static_cast<double>(*it->second->value);
-            pt.reason = "Valid";
+            if (it->second->validity == code::Validity::syntactic_only) {
+                pt.reason = !it->second->reason.empty() ? it->second->reason : "Syntactic only (approximate)";
+            } else {
+                pt.reason = "Valid";
+            }
         } else {
             pt.validFunctions = 0;
             pt.unknownFunctions = 1;
@@ -76,6 +89,7 @@ TrendPoint extractTrendPoint(const analysis::AnalysisSnapshot& snapshot, const T
     double maxVal = std::numeric_limits<double>::lowest();
     std::size_t validCount = 0;
     std::size_t unknownCount = 0;
+    std::size_t syntacticOnlyCount = 0;
 
     if (snapshot.parsed) {
         for (const auto& unit : snapshot.parsed->units) {
@@ -86,11 +100,14 @@ TrendPoint extractTrendPoint(const analysis::AnalysisSnapshot& snapshot, const T
                 if (!fn) continue;
                 auto it = metricMap.find(fn->id);
                 if (it != metricMap.end() && it->second->value.has_value() &&
-                    it->second->validity == code::Validity::valid) {
+                    (it->second->validity == code::Validity::valid || it->second->validity == code::Validity::syntactic_only)) {
                     double val = static_cast<double>(*it->second->value);
                     sum += val;
                     if (val > maxVal) maxVal = val;
                     ++validCount;
+                    if (it->second->validity == code::Validity::syntactic_only) {
+                        ++syntacticOnlyCount;
+                    }
                 } else {
                     ++unknownCount;
                 }
@@ -102,12 +119,16 @@ TrendPoint extractTrendPoint(const analysis::AnalysisSnapshot& snapshot, const T
     pt.unknownFunctions = unknownCount;
 
     if (validCount > 0) {
+        std::string warning;
+        if (syntacticOnlyCount > 0) {
+            warning = " (contains " + std::to_string(syntacticOnlyCount) + " syntactic_only approximations)";
+        }
         if (options.aggregation == TrendAggregation::file_mean) {
             pt.value = sum / static_cast<double>(validCount);
-            pt.reason = "Mean of " + std::to_string(validCount) + " functions";
+            pt.reason = "Mean of " + std::to_string(validCount) + " functions" + warning;
         } else if (options.aggregation == TrendAggregation::file_max) {
             pt.value = maxVal;
-            pt.reason = "Max of " + std::to_string(validCount) + " functions";
+            pt.reason = "Max of " + std::to_string(validCount) + " functions" + warning;
         }
     } else {
         pt.value = std::nullopt;

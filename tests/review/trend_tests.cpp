@@ -163,6 +163,100 @@ static void test_extractTrendPoint_file_mean_and_max()
     std::cout << "  [OK] extractTrendPoint: file_mean and file_max\n";
 }
 
+static void test_extractTrendPoint_duplicate_keys_yield_nullopt_ambiguous()
+{
+    // [P2] Дубльований ключ: дві функції з однаковим identityKey і метриками 10 та 90
+    auto snap = makeSnapshot("snap_dup", "src_dup", "fp_test");
+    addFunctionWithMetric(snap, "fn_dup1", "dupMethod()", "dup.cpp",
+                          analysis::MetricId::function_lines, 10);
+    addFunctionWithMetric(snap, "fn_dup2", "dupMethod()", "dup.cpp",
+                          analysis::MetricId::function_lines, 90);
+
+    TrendOptions opts;
+    opts.aggregation = TrendAggregation::function;
+    opts.entityKey = "dupMethod()";
+    opts.metricId = analysis::MetricId::function_lines;
+
+    TrendPoint pt = extractTrendPoint(*snap, opts);
+    // Неоднозначність має давати nullopt із поясненням
+    assert(!pt.value.has_value());
+    assert(pt.validFunctions == 0);
+    assert(pt.unknownFunctions == 2);
+    assert(pt.reason.find("Ambiguous") != std::string::npos);
+
+    // Перевірка при зворотній послідовності функцій
+    auto snapRev = makeSnapshot("snap_dup_rev", "src_dup_rev", "fp_test");
+    addFunctionWithMetric(snapRev, "fn_dup2", "dupMethod()", "dup.cpp",
+                          analysis::MetricId::function_lines, 90);
+    addFunctionWithMetric(snapRev, "fn_dup1", "dupMethod()", "dup.cpp",
+                          analysis::MetricId::function_lines, 10);
+
+    TrendPoint ptRev = extractTrendPoint(*snapRev, opts);
+    assert(!ptRev.value.has_value());
+    assert(ptRev.validFunctions == 0);
+    assert(ptRev.unknownFunctions == 2);
+    assert(ptRev.reason.find("Ambiguous") != std::string::npos);
+
+    std::cout << "  [OK] extractTrendPoint: duplicate keys yield nullopt with Ambiguous reason regardless of order\n";
+}
+
+static void test_extractTrendPoint_syntactic_only_function_and_aggregates()
+{
+    // [P2] syntactic_only: дозволяє числові значення з попередженням
+    // 1. Функціональний тренд для syntactic_only
+    auto snapFunc = makeSnapshot("snap_syn", "src_syn", "fp_test");
+    addFunctionWithMetric(snapFunc, "fn_syn", "macroFunc()", "macro.cpp",
+                          analysis::MetricId::function_lines, 42,
+                          code::Validity::syntactic_only);
+
+    TrendOptions optsFunc;
+    optsFunc.aggregation = TrendAggregation::function;
+    optsFunc.entityKey = "macroFunc()";
+    optsFunc.metricId = analysis::MetricId::function_lines;
+
+    TrendPoint ptFunc = extractTrendPoint(*snapFunc, optsFunc);
+    assert(ptFunc.validFunctions == 1);
+    assert(ptFunc.unknownFunctions == 0);
+    assert(ptFunc.value.has_value());
+    assert(*ptFunc.value == 42.0);
+    assert(!ptFunc.reason.empty());
+
+    // 2. Агрегація: валідний 10 і syntactic_only 42
+    auto snapAgg = makeSnapshot("snap_agg", "src_agg", "fp_test");
+    addFunctionWithMetric(snapAgg, "fn_val", "regularFunc()", "mixed.cpp",
+                          analysis::MetricId::function_lines, 10,
+                          code::Validity::valid);
+    addFunctionWithMetric(snapAgg, "fn_syn", "macroFunc()", "mixed.cpp",
+                          analysis::MetricId::function_lines, 42,
+                          code::Validity::syntactic_only);
+
+    TrendOptions optsMean;
+    optsMean.aggregation = TrendAggregation::file_mean;
+    optsMean.metricId = analysis::MetricId::function_lines;
+
+    TrendPoint ptMean = extractTrendPoint(*snapAgg, optsMean);
+    assert(ptMean.validFunctions == 2);
+    assert(ptMean.unknownFunctions == 0);
+    assert(ptMean.value.has_value());
+    // Середнє: (10 + 42) / 2 = 26
+    assert(*ptMean.value == 26.0);
+    assert(ptMean.reason.find("syntactic_only") != std::string::npos);
+
+    TrendOptions optsMax;
+    optsMax.aggregation = TrendAggregation::file_max;
+    optsMax.metricId = analysis::MetricId::function_lines;
+
+    TrendPoint ptMax = extractTrendPoint(*snapAgg, optsMax);
+    assert(ptMax.validFunctions == 2);
+    assert(ptMax.unknownFunctions == 0);
+    assert(ptMax.value.has_value());
+    // Максимум: max(10, 42) = 42
+    assert(*ptMax.value == 42.0);
+    assert(ptMax.reason.find("syntactic_only") != std::string::npos);
+
+    std::cout << "  [OK] extractTrendPoint: syntactic_only preserved for function, file_mean (26) and file_max (42)\n";
+}
+
 // ─── Tests for D18 splitTrendSegments ───────────────────────
 
 static void test_splitTrendSegments()
@@ -308,6 +402,8 @@ int main()
     test_extractTrendPoint_function_missing();
     test_extractTrendPoint_function_metric_unavailable();
     test_extractTrendPoint_file_mean_and_max();
+    test_extractTrendPoint_duplicate_keys_yield_nullopt_ambiguous();
+    test_extractTrendPoint_syntactic_only_function_and_aggregates();
 
     test_splitTrendSegments();
 
