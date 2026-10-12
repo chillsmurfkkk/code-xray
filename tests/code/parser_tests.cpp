@@ -1,4 +1,5 @@
 #include "code/api.hpp"
+#include "code/walk.hpp"
 
 #include <cstddef>
 #include <exception>
@@ -1134,6 +1135,124 @@ struct Holder { void (Widget::*member)(); };
     }
 }
 
+FileEntity walkFixture() {
+    FileEntity root;
+    root.name = "sample.cpp";
+
+    auto type = std::make_shared<TypeEntity>();
+    type->name = "Widget";
+    auto method = std::make_shared<FunctionEntity>();
+    method->name = "run";
+    auto inner = std::make_shared<TypeEntity>();
+    inner->name = "Inner";
+    auto nested = std::make_shared<FunctionEntity>();
+    nested->name = "nested";
+    auto function = std::make_shared<FunctionEntity>();
+    function->name = "helper";
+
+    inner->children.push_back(nested);
+    type->children = {method, inner};
+    root.children = {type, function};
+    return root;
+}
+
+void walkPreservesOrderAndParents() {
+    const auto root = walkFixture();
+    using Visit = std::pair<std::string, const CodeEntity*>;
+    std::vector<Visit> visited;
+    auto visitor = [&](const CodeEntity& entity, const CodeEntity* parent) {
+        visited.emplace_back(entity.name, parent);
+        return WalkAction::descend;
+    };
+
+    check(walkEntities(root, visitor), "Walk must finish when all visits descend");
+    const auto* type = root.children[0].get();
+    const auto* inner = type->children[1].get();
+    const std::vector<Visit> expected{
+        {"sample.cpp", nullptr},
+        {"Widget", &root},
+        {"run", type},
+        {"Inner", type},
+        {"nested", inner},
+        {"helper", &root}
+    };
+    check(visited == expected,
+          "Walk must visit parents before children, preserve sibling order and pass exact parents");
+}
+
+void walkSkipsOnlySelectedSubtree() {
+    const auto root = walkFixture();
+    std::vector<std::string> visited;
+    auto visitor = [&](const CodeEntity& entity, const CodeEntity*) {
+        visited.push_back(entity.name);
+        return entity.name == "Widget"
+            ? WalkAction::skip_children : WalkAction::descend;
+    };
+
+    check(walkEntities(root, visitor), "Skipping children must still count as completion");
+    check(visited == std::vector<std::string>{"sample.cpp", "Widget", "helper"},
+          "Skipping a type must omit all descendants and still visit its next sibling");
+}
+
+void walkCanSkipRootChildren() {
+    const auto root = walkFixture();
+    std::size_t visits = 0;
+    auto visitor = [&](const CodeEntity& entity, const CodeEntity* parent) {
+        ++visits;
+        check(&entity == &root && parent == nullptr, "Only the root must be visited");
+        return WalkAction::skip_children;
+    };
+
+    check(walkEntities(root, visitor), "Skipping root children must complete the walk");
+    check(visits == 1, "Root must be visited once even when its children are skipped");
+}
+
+void walkStopsBeforePendingBranches() {
+    const auto root = walkFixture();
+    std::vector<std::string> visited;
+    auto visitor = [&](const CodeEntity& entity, const CodeEntity*) {
+        visited.push_back(entity.name);
+        return entity.name == "run" ? WalkAction::stop : WalkAction::descend;
+    };
+
+    check(!walkEntities(root, visitor), "An early stop must return false");
+    check(visited == std::vector<std::string>{"sample.cpp", "Widget", "run"},
+          "Stopping must omit pending branches at every ancestor level");
+}
+
+void walkCanStopAtRoot() {
+    const auto root = walkFixture();
+    std::size_t visits = 0;
+    auto visitor = [&](const CodeEntity& entity, const CodeEntity* parent) {
+        ++visits;
+        check(&entity == &root && parent == nullptr, "Only the root must be visited");
+        return WalkAction::stop;
+    };
+
+    check(!walkEntities(root, visitor), "Stopping at the root must return false");
+    check(visits == 1, "Stopping at the root must prevent all child visits");
+}
+
+void walkHandlesLeafAndNullChildren() {
+    FileEntity root;
+    std::vector<const CodeEntity*> visited;
+    auto visitor = [&](const CodeEntity& entity, const CodeEntity*) {
+        visited.push_back(&entity);
+        return WalkAction::descend;
+    };
+
+    check(walkEntities(root, visitor), "A root without children must complete");
+    check(visited == std::vector<const CodeEntity*>{&root},
+          "A leaf root must still be visited");
+
+    auto function = std::make_shared<FunctionEntity>();
+    root.children = {nullptr, function, nullptr};
+    visited.clear();
+    check(walkEntities(root, visitor), "Null children must not prevent completion");
+    check(visited == std::vector<const CodeEntity*>{&root, function.get()},
+          "Null children must be skipped without hiding valid siblings");
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -1142,6 +1261,12 @@ struct TestCase {
 
 int main() {
     const TestCase cases[] = {
+        {"walk preserves order and parents", walkPreservesOrderAndParents},
+        {"walk skips only selected subtree", walkSkipsOnlySelectedSubtree},
+        {"walk skips root children", walkCanSkipRootChildren},
+        {"walk stops before pending branches", walkStopsBeforePendingBranches},
+        {"walk stops at root", walkCanStopAtRoot},
+        {"walk handles leaf and null children", walkHandlesLeafAndNullChildren},
         {"empty inputs", emptyInputs},
         {"invalid inputs and versions", invalidInputs},
         {"original UTF-8/BOM bytes and LF/CRLF ranges", originalBytesAndRanges},
