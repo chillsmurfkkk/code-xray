@@ -1,12 +1,24 @@
 cmake_minimum_required(VERSION 3.25)
+if(APPLE AND NOT CMAKE_OSX_SYSROOT)
+    execute_process(COMMAND xcrun --sdk macosx --show-sdk-path
+        OUTPUT_VARIABLE _MACOSX_SDK_PATH
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_MACOSX_SDK_PATH)
+        set(CMAKE_OSX_SYSROOT "${_MACOSX_SDK_PATH}" CACHE PATH "macOS SDK root")
+    endif()
+endif()
+
 project(CodeXray VERSION 0.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
-if(NOT WIN32 OR NOT MSVC OR NOT CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
-    message(FATAL_ERROR "E0 supports Windows x64 with MSVC only; use the documented presets.")
+if(WIN32)
+    if(NOT MSVC OR NOT CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+        message(FATAL_ERROR "E0 supports Windows x64 with MSVC only; use the documented presets.")
+    endif()
+else()
+    message(STATUS "Configuring on non-Windows platform: ${CMAKE_SYSTEM_NAME} (${CMAKE_CXX_COMPILER_ID})")
 endif()
 
 option(CODE_XRAY_BUILD_APP "Build the Qt application and dependency smoke test" ON)
@@ -18,6 +30,8 @@ target_compile_features(xray_common INTERFACE cxx_std_20)
 
 if(MSVC)
     target_compile_options(xray_common INTERFACE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(xray_common INTERFACE -Wall -Wextra -Wpedantic)
 endif()
 
 add_library(xray_code STATIC
@@ -25,8 +39,13 @@ add_library(xray_code STATIC
 )
 target_link_libraries(xray_code PUBLIC xray_common)
 
-add_library(xray_analysis INTERFACE)
-target_link_libraries(xray_analysis INTERFACE xray_code)
+add_library(xray_analysis STATIC
+    src/analysis/metrics.cpp
+    src/analysis/rules.cpp
+)
+target_include_directories(xray_analysis PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_features(xray_analysis PUBLIC cxx_std_20)
+target_link_libraries(xray_analysis PUBLIC xray_code)
 
 add_library(xray_history INTERFACE)
 target_link_libraries(xray_history INTERFACE xray_code)
@@ -49,6 +68,7 @@ if(BUILD_TESTING)
     add_executable(trend_tests tests/review/trend_tests.cpp)
     target_link_libraries(trend_tests PRIVATE xray_review)
     add_test(NAME trend COMMAND trend_tests)
+
     add_executable(history_test tests/history_test.cpp)
     target_link_libraries(history_test PRIVATE xray_history)
     add_test(NAME history_test COMMAND history_test)
@@ -56,6 +76,10 @@ if(BUILD_TESTING)
     add_executable(contract_tests tests/contracts.cpp)
     target_link_libraries(contract_tests PRIVATE xray_history xray_review)
     add_test(NAME contracts COMMAND contract_tests)
+
+    add_executable(analysis_tests tests/analysis_tests.cpp)
+    target_link_libraries(analysis_tests PRIVATE xray_analysis)
+    add_test(NAME analysis COMMAND analysis_tests)
 
     add_executable(source_provider_test tests/source_provider_test.cpp)
     target_link_libraries(source_provider_test PRIVATE xray_code)
@@ -88,10 +112,11 @@ if(CODE_XRAY_BUILD_APP)
     qt_add_executable(code-xray WIN32 src/app/main.cpp)
     target_link_libraries(code-xray PRIVATE Qt6::Widgets xray_history xray_review)
 
-    # Â³äíîâëåíî POST_BUILD äëÿ windeployqt
-    add_custom_command(TARGET code-xray POST_BUILD
-        COMMAND "$<TARGET_FILE:Qt6::windeployqt>" --no-translations --no-compiler-runtime "$<TARGET_FILE:code-xray>"
-        VERBATIM)
+    if(WIN32)
+        add_custom_command(TARGET code-xray POST_BUILD
+            COMMAND "$<TARGET_FILE:Qt6::windeployqt>" --no-translations --no-compiler-runtime "$<TARGET_FILE:code-xray>"
+            VERBATIM)
+    endif()
 
     if(BUILD_TESTING)
         add_executable(parser_tests tests/code/parser_tests.cpp)

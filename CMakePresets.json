@@ -18,14 +18,28 @@
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/contracts-only",
       "cacheVariables": { "CODE_XRAY_BUILD_APP": "OFF", "BUILD_TESTING": "ON" }
+    },
+    {
+      "name": "macos-contracts",
+      "displayName": "macOS / Clang / Contracts & Tests",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/macos-contracts",
+      "cacheVariables": { "CODE_XRAY_BUILD_APP": "OFF", "BUILD_TESTING": "ON" },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
     }
   ],
   "buildPresets": [
     { "name": "windows-x64", "configurePreset": "windows-x64", "configuration": "Debug" },
-    { "name": "contracts-only", "configurePreset": "contracts-only", "configuration": "Debug" }
+    { "name": "contracts-only", "configurePreset": "contracts-only", "configuration": "Debug" },
+    { "name": "macos-contracts", "configurePreset": "macos-contracts", "configuration": "Debug" }
   ],
   "testPresets": [
     { "name": "windows-x64", "configurePreset": "windows-x64", "configuration": "Debug", "output": { "outputOnFailure": true } },
-    { "name": "contracts-only", "configurePreset": "contracts-only", "configuration": "Debug", "output": { "outputOnFailure": true } }
+    { "name": "contracts-only", "configurePreset": "contracts-only", "configuration": "Debug", "output": { "outputOnFailure": true } },
+    { "name": "macos-contracts", "configurePreset": "macos-contracts", "configuration": "Debug", "output": { "outputOnFailure": true } }
   ]
 }
