@@ -1,5 +1,6 @@
 #include "code/api.hpp"
 #include "code/search.hpp"
+#include "code/validation.hpp"
 #include "code/walk.hpp"
 
 #include <cstddef>
@@ -1368,6 +1369,161 @@ void searchResultsOwnTheirIds() {
     checkSearchMatches(matches, {{expectedId, true}});
 }
 
+void checkRangeIssues(
+    const std::vector<RangeIssue>& actual,
+    std::initializer_list<std::pair<EntityId, std::string>> expected
+) {
+    check(actual.size() == expected.size(), "Validation must report exactly the expected issues");
+    std::size_t index = 0;
+    for (const auto& [id, message] : expected) {
+        check(actual[index].entityId == id, "Range issue must identify the offending entity");
+        if (actual[index].message != message) {
+            throw std::runtime_error("Expected range issue '" + message +
+                                     "', got '" + actual[index].message + "'");
+        }
+        ++index;
+    }
+}
+
+void rangesAcceptParsedEntities() {
+    const auto parsed = searchFixture();
+    for (const auto& unit : parsed.units) {
+        check(validateEntityRanges(*unit.root, unit.root->sourceBytes->size()).empty(),
+              "Real parsed types and functions must have valid nested ranges");
+    }
+    const auto other = parseSuccessfully(source({
+        {"empty.cpp", ""},
+        {"crlf.cpp", "// UTF-8: \xD0\xBA\xD0\xBE\xD0\xB4\r\nvoid run() {\r\n}\r\n"}
+    }));
+    for (const auto& unit : other.units) {
+        check(validateEntityRanges(*unit.root, unit.root->sourceBytes->size()).empty(),
+              "Empty files and UTF-8/CRLF source must validate");
+    }
+}
+
+void rangesAcceptEqualBoundsAndEmptySpans() {
+    FileEntity root;
+    root.range = {0, 100, 1, 10};
+    auto equal = std::make_shared<TypeEntity>();
+    equal->range = root.range;
+    auto empty = std::make_shared<FunctionEntity>();
+    empty->range = {100, 100, 10, 10};
+    equal->children.push_back(empty);
+    root.children.push_back(equal);
+
+    check(validateEntityRanges(root, 100).empty(),
+          "Equal parent bounds, an end at source size and zero-length spans must be allowed");
+    FileEntity emptyRoot;
+    check(validateEntityRanges(emptyRoot, 0).empty(),
+          "A zero-byte file with line one must be allowed");
+}
+
+void rangesDetectReversedBytes() {
+    FileEntity root;
+    root.id = "reversed";
+    root.range = {80, 40, 1, 1};
+    checkRangeIssues(validateEntityRanges(root, 100), {
+        {"reversed", "Byte range is reversed"}
+    });
+}
+
+void rangesDetectSourceOverflow() {
+    FileEntity root;
+    root.id = "oversized";
+    root.range = {0, 101, 1, 1};
+    checkRangeIssues(validateEntityRanges(root, 100), {
+        {"oversized", "Byte range exceeds source size"}
+    });
+}
+
+void rangesRejectZeroAndReversedLines() {
+    FileEntity root;
+    root.id = "invalid-lines";
+    root.range = {0, 0, 0, 0};
+    checkRangeIssues(validateEntityRanges(root, 0), {
+        {"invalid-lines", "Line range is invalid"}
+    });
+    root.range = {0, 0, 3, 2};
+    checkRangeIssues(validateEntityRanges(root, 0), {
+        {"invalid-lines", "Line range is invalid"}
+    });
+}
+
+void rangesDetectByteParentViolations() {
+    FileEntity root;
+    root.range = {0, 200, 1, 20};
+    auto type = std::make_shared<TypeEntity>();
+    type->range = {20, 100, 3, 10};
+    auto method = std::make_shared<FunctionEntity>();
+    method->id = "method";
+    type->children.push_back(method);
+    root.children.push_back(type);
+
+    method->range = {10, 70, 4, 7};
+    checkRangeIssues(validateEntityRanges(root, 200), {
+        {"method", "Byte range is outside parent"}
+    });
+    method->range = {30, 120, 4, 7};
+    checkRangeIssues(validateEntityRanges(root, 200), {
+        {"method", "Byte range is outside parent"}
+    });
+}
+
+void rangesDetectLineParentViolations() {
+    FileEntity root;
+    root.range = {0, 200, 1, 20};
+    auto type = std::make_shared<TypeEntity>();
+    type->range = {20, 100, 3, 10};
+    auto method = std::make_shared<FunctionEntity>();
+    method->id = "method";
+    type->children.push_back(method);
+    root.children.push_back(type);
+
+    method->range = {30, 70, 2, 7};
+    checkRangeIssues(validateEntityRanges(root, 200), {
+        {"method", "Line range is outside parent"}
+    });
+    method->range = {30, 70, 4, 12};
+    checkRangeIssues(validateEntityRanges(root, 200), {
+        {"method", "Line range is outside parent"}
+    });
+}
+
+void rangesContinueAfterInvalidEntities() {
+    FileEntity root;
+    root.range = {0, 100, 1, 10};
+    auto type = std::make_shared<TypeEntity>();
+    type->id = "type";
+    type->range = {80, 40, 1, 10};
+    auto nested = std::make_shared<FunctionEntity>();
+    nested->id = "nested";
+    nested->range = {10, 20, 0, 0};
+    auto sibling = std::make_shared<FunctionEntity>();
+    sibling->id = "sibling";
+    sibling->range = {10, 20, 0, 0};
+    type->children.push_back(nested);
+    root.children = {type, sibling};
+
+    const auto issues = validateEntityRanges(root, 100);
+    check(issues.size() == 3, "Validation must collect issues in descendants and later siblings");
+    check(issues[0].entityId == "type" && issues[1].entityId == "nested" &&
+          issues[2].entityId == "sibling",
+          "An invalid entity must not stop validation or hide its subtree");
+}
+
+void rangesAvoidContainmentErrorsForInvalidParentBounds() {
+    FileEntity root;
+    root.id = "root";
+    root.range = {80, 40, 8, 4};
+    auto function = std::make_shared<FunctionEntity>();
+    function->range = {10, 20, 1, 2};
+    root.children.push_back(function);
+
+    const auto issues = validateEntityRanges(root, 100);
+    check(issues.size() == 2 && issues[0].entityId == "root" && issues[1].entityId == "root",
+          "Invalid parent bounds must be reported without misleading child-containment issues");
+}
+
 struct TestCase {
     const char* name;
     void (*run)();
@@ -1376,6 +1532,15 @@ struct TestCase {
 
 int main() {
     const TestCase cases[] = {
+        {"ranges accept parsed entities", rangesAcceptParsedEntities},
+        {"ranges accept equal bounds and empty spans", rangesAcceptEqualBoundsAndEmptySpans},
+        {"ranges detect reversed bytes", rangesDetectReversedBytes},
+        {"ranges detect source overflow", rangesDetectSourceOverflow},
+        {"ranges reject zero and reversed lines", rangesRejectZeroAndReversedLines},
+        {"ranges detect byte parent violations", rangesDetectByteParentViolations},
+        {"ranges detect line parent violations", rangesDetectLineParentViolations},
+        {"ranges continue after invalid entities", rangesContinueAfterInvalidEntities},
+        {"ranges avoid invalid parent containment errors", rangesAvoidContainmentErrorsForInvalidParentBounds},
         {"search ranks exact matches stably", searchRanksExactMatchesStably},
         {"search kind filter visits nested functions", searchKindFilterStillVisitsNestedFunctions},
         {"search empty query preserves tree order", searchEmptyQueryPreservesTreeOrder},
