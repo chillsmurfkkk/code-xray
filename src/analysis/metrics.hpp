@@ -31,4 +31,32 @@ public:
     [[nodiscard]] MetricResult calculate(const code::FunctionEntity& function) const override;
 };
 
+// Nesting metric: calculates maximum nesting depth of control constructs (B02)
+class NestingMetric final : public Metric {
+public:
+    [[nodiscard]] MetricId id() const noexcept override {
+        return MetricId::max_nesting;
+    }
+
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return "max_nesting";
+    }
+
+    [[nodiscard]] MetricResult calculate(const code::FunctionEntity& function) const override;
+};
+
+// Branch count metric: calculates syntax branch points count (B03)
+class BranchCountMetric final : public Metric {
+public:
+    [[nodiscard]] MetricId id() const noexcept override {
+        return MetricId::branch_count;
+    }
+
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return "branch_count";
+    }
+
+    [[nodiscard]] MetricResult calculate(const code::FunctionEntity& function) const override;
+};
+
 } // namespace xray::analysis
