@@ -25,9 +25,9 @@ exceptions. It does not validate our application schema or save files safely;
 those remain our responsibility. Tests include damaged JSON, invalid field types,
 unsupported schemas and failed saves, rather than only successful round trips.
 
-Local verification: the profile/rule executable and six existing test executables
-passed. Full macOS CMake build remains blocked by an unrelated source-provider
-compile error. Windows integration has not been executed here.
+Local verification: after guarding MSVC-specific junction checks in the source
+provider, the macos-contracts CMake build and all eight CTest suites pass.
+Windows integration has not been executed here.
 
 Sources used:
 - [parse API](https://json.nlohmann.me/api/basic_json/parse/): parser callback and exceptions.

@@ -77,13 +77,12 @@ cmake --build --preset macos-contracts
 ctest --preset macos-contracts
 ```
 
-The current macOS build has a pre-existing compile error at
-`src/code/source.cpp:228,439` (`std::filesystem::file_type::junction`). It is
-outside this PR. The following seven executables were compiled separately with
-AppleClang/C++20 and the Xcode macOS 26.5 SDK, and all passed: analysis, profiles,
-review, compare, trend, contracts, history. The profiles public header also
-compiled independently through its CMake target. Windows/Qt/parser/source-provider
-execution was not verified in this environment.
+The macOS source-provider build now guards the MSVC-specific `file_type::junction`
+checks with `_MSVC_STL_VERSION`. The `macos-contracts` CMake build succeeds and
+all eight CTest suites pass: review, compare, trend, history_test, contracts,
+analysis, profiles and source_provider. The profiles public header also compiles
+independently. Windows, Qt startup and Tree-sitter parser execution have not been
+verified in this environment.
 
 `tests/analysis/profile_tests.cpp` covers all three rules through `Rule&`,
 threshold equality/excess, toggles, wrong/missing/unavailable metrics, precision
