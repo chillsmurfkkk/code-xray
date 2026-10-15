@@ -168,3 +168,22 @@ ID A01–A25 збережено там, де є фактичний відпов�
 | B-LIB | 3 | B (Kolya0685) | JSON-профілі: парсинг, callback, типи, серіалізація | `src/analysis/profiles.cpp` | Інтегровано, локально перевірено; особиста демонстрація попереду | `tests/analysis/profile_tests.cpp`, `docs/retrospectives/Kolya0685.md` |
 
 Нових полів у публічних типах PR3 не додає. B24 не рахується вдруге. Реалізовані раніше B01–B04 не приписуються цьому PR. GUI, `analyze`, відбиток і статичний поліморфізм не позначені завершеними.
+
+## B — завершення ядра ЛР1 (PR4)
+
+| ID плану | ЛР | Автор | Елемент/тип | Файл і символ у коді | Стан | Перевірка/демонстрація |
+|---|---|---|---|---|---|---|
+| B07 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/engine.cpp::analyze` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B14 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/engine.cpp::makeAnalysisFingerprint` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B15 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/engine.cpp::buildMetricRegistry` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B16 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/engine.cpp::resolveEnabledRules` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B17 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/engine.cpp::summarizeCoverage` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B18 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/aggregation.hpp::aggregateMetrics<Reducer>` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B19 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/aggregation.hpp::MeanReducer::accumulate` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B20 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/aggregation.hpp::MaxReducer::accumulate` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B21 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/engine.cpp::filterFindings` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B22 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/engine.cpp::groupFindingsByFile` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B23 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/engine.cpp::rankFunctions` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+| B25 | 1 | B (Kolya0685) | Алгоритм | `src/analysis/engine.cpp::validateAnalysisResult` | Реалізовано, локально перевірено | `tests/analysis/engine_tests.cpp`, `analysis_demo` |
+
+Раніше реалізовані B01–B04 також мають докази: `LengthMetric::calculate`, `NestingMetric::calculate`, `BranchCountMetric::calculate` у `src/analysis/metrics.cpp`, `LongFunctionRule::evaluate` у `src/analysis/rules.cpp`; тести — `tests/analysis_tests.cpp`. Це облік попередніх PR, а не нові реалізації PR4. B05–B06, B08–B13, B24 наведені в таблиці PR3 вище. Повний перелік типів, полів, алгоритмів та трьох випадків поліморфізму: [lab1-B.md](lab1-B.md). Старі примітки PR3 про наступні етапи описують стан на момент PR3. GUI залишається наступною ЛР2.

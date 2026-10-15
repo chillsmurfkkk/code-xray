@@ -50,7 +50,7 @@ target_link_libraries(xray_analysis PUBLIC xray_code)
 
 if(CODE_XRAY_BUILD_PROFILES)
     find_package(nlohmann_json 3.12.0 EXACT CONFIG REQUIRED)
-    target_sources(xray_analysis PRIVATE src/analysis/profiles.cpp)
+    target_sources(xray_analysis PRIVATE src/analysis/profiles.cpp src/analysis/engine.cpp)
     target_link_libraries(xray_analysis PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
@@ -89,6 +89,11 @@ if(BUILD_TESTING)
     add_test(NAME analysis COMMAND analysis_tests)
 
     if(CODE_XRAY_BUILD_PROFILES)
+        add_executable(engine_tests tests/analysis/engine_tests.cpp)
+        target_link_libraries(engine_tests PRIVATE xray_review)
+        add_test(NAME analysis_engine COMMAND engine_tests)
+        add_executable(analysis_demo tests/analysis/demo.cpp)
+        target_link_libraries(analysis_demo PRIVATE xray_analysis)
         add_executable(profile_tests tests/analysis/profile_tests.cpp)
         target_link_libraries(profile_tests PRIVATE xray_analysis nlohmann_json::nlohmann_json)
         add_test(NAME profiles COMMAND profile_tests)
@@ -104,7 +109,7 @@ if(BUILD_TESTING)
     set(contract_headers
         common/job.hpp common/result.hpp
         code/types.hpp code/api.hpp
-        analysis/types.hpp analysis/api.hpp
+        analysis/types.hpp analysis/api.hpp analysis/engine.hpp analysis/aggregation.hpp
         history/types.hpp history/api.hpp
         review/types.hpp review/api.hpp)
     foreach(relative_header IN LISTS contract_headers)
