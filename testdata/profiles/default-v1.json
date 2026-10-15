@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "default-v1",
+  "name": "Default",
+  "rules": {
+    "long_function": {"enabled": true, "threshold": 60},
+    "deep_nesting": {"enabled": true, "threshold": 3},
+    "many_branches": {"enabled": true, "threshold": 10}
+  }
+}
