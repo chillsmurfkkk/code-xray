@@ -53,8 +53,8 @@ Include `analysis/profiles.hpp`; no JSON type crosses the public boundary.
   to display stale results. Grammar/source compatibility remains the separate
   `analysisFingerprint` contract.
 
-`analyze()`, the complete analysis fingerprint, reducers and GUI integration
-remain subsequent work. This PR provides the profile/rule layer they will use.
+`analyze()`, the compatibility fingerprint and reducers are implemented by the
+[analysis engine](analysis-engine.md). GUI integration remains subsequent work.
 
 ## Build and verification
 
