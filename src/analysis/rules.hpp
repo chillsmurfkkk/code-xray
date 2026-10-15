@@ -44,6 +44,24 @@ public:
         const AnalysisProfile& profile) const override;
 };
 
+class DeepNestingRule final : public Rule {
+public:
+    [[nodiscard]] RuleId id() const noexcept override { return RuleId::deep_nesting; }
+    [[nodiscard]] std::string_view name() const noexcept override { return "deep_nesting"; }
+    [[nodiscard]] MetricId targetMetricId() const noexcept override { return MetricId::max_nesting; }
+    [[nodiscard]] std::optional<Finding> evaluate(
+        const code::FunctionEntity&, const MetricResult&, const AnalysisProfile&) const override;
+};
+
+class ManyBranchesRule final : public Rule {
+public:
+    [[nodiscard]] RuleId id() const noexcept override { return RuleId::many_branches; }
+    [[nodiscard]] std::string_view name() const noexcept override { return "many_branches"; }
+    [[nodiscard]] MetricId targetMetricId() const noexcept override { return MetricId::branch_count; }
+    [[nodiscard]] std::optional<Finding> evaluate(
+        const code::FunctionEntity&, const MetricResult&, const AnalysisProfile&) const override;
+};
+
 // Formats user-friendly explanation of a finding (B24)
 std::string formatFindingExplanation(
     const code::FunctionEntity& function,

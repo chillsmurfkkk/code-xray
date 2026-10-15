@@ -150,3 +150,21 @@ ID A01–A25 збережено там, де є фактичний відпов�
 - Тестові функції не входять у число 37. Для getters, конструкторів, бібліотечного та згенерованого коду немає окремого зарахування. Цей розділ не заявляє виконання GUI ЛР №2 або ретроспективи ЛР №3.
 
 Підтверджений запуск 2026-10-13: `cmake --build --preset windows-x64 --target parser_tests`, потім `ctest --preset windows-x64 -R "^parser$" --output-on-failure`. Пройшли всі 63 сценарії, включно з обходом, пошуком і перевіркою діапазонів. Посилання на source-provider тести вище вказують на наявні сценарії; цей запис не стверджує нового запуску повної збірки або всіх CTest targets.
+
+## B — правила та профілі (PR3)
+
+| ID плану | ЛР | Автор | Елемент/тип | Файл і символ у коді | Стан | Перевірка/демонстрація |
+|---|---|---|---|---|---|---|
+| B05 | 1 | B (Kolya0685) | Метод / клас | `src/analysis/rules.cpp::DeepNestingRule::evaluate` | Реалізовано, локально перевірено | `tests/analysis/profile_tests.cpp` |
+| B06 | 1 | B (Kolya0685) | Метод / клас | `src/analysis/rules.cpp::ManyBranchesRule::evaluate` | Реалізовано, локально перевірено | `tests/analysis/profile_tests.cpp` |
+| B08 | 1 | B (Kolya0685) | Функція | `src/analysis/profiles.cpp::validateProfile` | Реалізовано, локально перевірено | `tests/analysis/profile_tests.cpp` |
+| B09 | 1 | B (Kolya0685) | Функція | `src/analysis/profiles.cpp::decodeProfile` | Реалізовано, локально перевірено | `tests/analysis/profile_tests.cpp` |
+| B10 | 1 | B (Kolya0685) | Функція | `src/analysis/profiles.cpp::encodeProfile` | Реалізовано, локально перевірено | `tests/analysis/profile_tests.cpp` |
+| B11 | 1 | B (Kolya0685) | Функція | `src/analysis/profiles.cpp::loadProfile` | Реалізовано, локально перевірено | `tests/analysis/profile_tests.cpp` |
+| B12 | 1 | B (Kolya0685) | Функція | `src/analysis/profiles.cpp::saveProfile` | Реалізовано, локально перевірено | `tests/analysis/profile_tests.cpp` |
+| B13 | 1 | B (Kolya0685) | Функція | `src/analysis/profiles.cpp::duplicateProfile` | Реалізовано, локально перевірено | `tests/analysis/profile_tests.cpp` |
+| B24 | 1 | B (Kolya0685) | Уточнення реалізації з PR1 | `src/analysis/rules.cpp::formatFindingExplanation` | Реалізовано, локально перевірено | `tests/analysis/profile_tests.cpp` |
+| B-STALE | 1 | B (Kolya0685) | Додаткова функція | `src/analysis/profiles.cpp::isAnalysisCurrent` | Реалізовано, локально перевірено | `tests/analysis/profile_tests.cpp` |
+| B-LIB | 3 | B (Kolya0685) | JSON-профілі: парсинг, callback, типи, серіалізація | `src/analysis/profiles.cpp` | Інтегровано, локально перевірено; особиста демонстрація попереду | `tests/analysis/profile_tests.cpp`, `docs/retrospectives/Kolya0685.md` |
+
+Нових полів у публічних типах PR3 не додає. B24 не рахується вдруге. Реалізовані раніше B01–B04 не приписуються цьому PR. GUI, `analyze`, відбиток і статичний поліморфізм не позначені завершеними.

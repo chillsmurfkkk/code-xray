@@ -22,6 +22,7 @@ else()
 endif()
 
 option(CODE_XRAY_BUILD_APP "Build the Qt application and dependency smoke test" ON)
+option(CODE_XRAY_BUILD_PROFILES "Build JSON profile persistence and tests" ON)
 include(CTest)
 
 add_library(xray_common INTERFACE)
@@ -46,6 +47,12 @@ add_library(xray_analysis STATIC
 target_include_directories(xray_analysis PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(xray_analysis PUBLIC cxx_std_20)
 target_link_libraries(xray_analysis PUBLIC xray_code)
+
+if(CODE_XRAY_BUILD_PROFILES)
+    find_package(nlohmann_json 3.12.0 EXACT CONFIG REQUIRED)
+    target_sources(xray_analysis PRIVATE src/analysis/profiles.cpp)
+    target_link_libraries(xray_analysis PRIVATE nlohmann_json::nlohmann_json)
+endif()
 
 add_library(xray_history INTERFACE)
 target_link_libraries(xray_history INTERFACE xray_code)
@@ -80,6 +87,15 @@ if(BUILD_TESTING)
     add_executable(analysis_tests tests/analysis_tests.cpp)
     target_link_libraries(analysis_tests PRIVATE xray_analysis)
     add_test(NAME analysis COMMAND analysis_tests)
+
+    if(CODE_XRAY_BUILD_PROFILES)
+        add_executable(profile_tests tests/analysis/profile_tests.cpp)
+        target_link_libraries(profile_tests PRIVATE xray_analysis nlohmann_json::nlohmann_json)
+        add_test(NAME profiles COMMAND profile_tests)
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/analysis_profiles_hpp.cpp" "#include \"analysis/profiles.hpp\"\n")
+        add_library(header_analysis_profiles_hpp OBJECT "${CMAKE_CURRENT_BINARY_DIR}/analysis_profiles_hpp.cpp")
+        target_link_libraries(header_analysis_profiles_hpp PRIVATE xray_common)
+    endif()
 
     add_executable(source_provider_test tests/source_provider_test.cpp)
     target_link_libraries(source_provider_test PRIVATE xray_code)
