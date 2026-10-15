@@ -224,8 +224,11 @@ Result<std::filesystem::path> validateSourceFile(
             return Error{ErrorCode::read_error, "Cannot inspect selected file path"};
         }
 
-        if (std::filesystem::is_symlink(status) ||
-            status.type() == std::filesystem::file_type::junction) {
+        if (std::filesystem::is_symlink(status)
+#ifdef _MSVC_STL_VERSION
+            || status.type() == std::filesystem::file_type::junction
+#endif
+        ) {
             return Error{
                 ErrorCode::invalid_input,
                 "Symbolic links and junctions are not supported"
@@ -435,8 +438,11 @@ Result<DirectoryScan> scanDirectory(
                 relativeText
             }, true);
         }
-        else if (std::filesystem::is_symlink(status) ||
-                 status.type() == std::filesystem::file_type::junction) {
+        else if (std::filesystem::is_symlink(status)
+#ifdef _MSVC_STL_VERSION
+                 || status.type() == std::filesystem::file_type::junction
+#endif
+        ) {
             iterator.disable_recursion_pending();
 
             recordSkip(Error{
