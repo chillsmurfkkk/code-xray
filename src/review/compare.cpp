@@ -784,11 +784,4 @@ Result<ComparisonReport> compare(
     return report;
 }
 
-// exportReport — заглушка для PR4 (буде реалізовано в exporter.cpp)
-// ─────────────────────────────────────────────────────────────
-Result<ExportReceipt> exportReport(const ComparisonReport&, const ExportOptions&, const JobContext&)
-{
-    return Error{ErrorCode::unsupported_encoding, "exportReport: scheduled for next PR."};
-}
-
 } // namespace xray::review
