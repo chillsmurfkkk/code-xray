@@ -21,6 +21,11 @@
 | D17 | 1 | D (Ковальчук) | Функція | `src/review/trend.cpp::xray::review::extractTrendPoint` | Реалізовано | `tests/review/trend_tests.cpp::test_extractTrendPoint_*` |
 | D18 | 1 | D (Ковальчук) | Функція | `src/review/trend.cpp::xray::review::splitTrendSegments` | Реалізовано | `tests/review/trend_tests.cpp::test_splitTrendSegments` |
 | D19 | 1 | D (Ковальчук) | Функція | `src/review/compare.cpp::xray::review::makeReviewExplanation` | Реалізовано | `tests/review/compare_tests.cpp` |
+| D20 | 1 | D (Ковальчук) | Функція | `src/review/exporter.cpp::xray::review::buildReportModel` | Реалізовано | `tests/review/export_tests.cpp::test_buildReportModel` |
+| D21 | 1 | D (Ковальчук) | Функція | `src/review/exporter.cpp::xray::review::escapeHtmlText` | Реалізовано | `tests/review/export_tests.cpp::test_escapeHtmlText` |
+| D22 | 1 | D (Ковальчук) | Метод класу | `src/review/exporter.cpp::xray::review::HtmlExporter::write` | Реалізовано | `tests/review/export_tests.cpp::test_htmlExporter` |
+| D23 | 1 | D (Ковальчук) | Метод класу | `src/review/exporter.cpp::xray::review::JsonExporter::write` | Реалізовано | `tests/review/export_tests.cpp::test_jsonExporter` |
+| D24 | 1 | D (Ковальчук) | Функція | `src/review/exporter.cpp::xray::review::writeReportSafely` | Реалізовано | `tests/review/export_tests.cpp::test_writeReportSafely` |
 | D25 | 1 | D (Ковальчук) | Функція | `src/review/compare.cpp::xray::review::validateComparisonReport` | Реалізовано | `tests/review/compare_tests.cpp::test_validate_*` |
 
 ## A — структура та розбір C++ коду

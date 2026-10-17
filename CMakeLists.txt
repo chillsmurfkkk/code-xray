@@ -23,6 +23,7 @@ endif()
 
 option(CODE_XRAY_BUILD_APP "Build the Qt application and dependency smoke test" ON)
 option(CODE_XRAY_BUILD_PROFILES "Build JSON profile persistence and tests" ON)
+option(CODE_XRAY_BUILD_EXPORT "Build report exporter (HTML/JSON via inja/nlohmann_json) and export tests" ON)
 include(CTest)
 
 add_library(xray_common INTERFACE)
@@ -63,6 +64,19 @@ add_library(xray_review STATIC
 )
 target_link_libraries(xray_review PUBLIC xray_analysis)
 
+if(CODE_XRAY_BUILD_EXPORT)
+    find_package(nlohmann_json CONFIG REQUIRED)
+    find_package(inja CONFIG REQUIRED)
+    target_sources(xray_review PRIVATE src/review/exporter.cpp)
+    target_link_libraries(xray_review PUBLIC
+        nlohmann_json::nlohmann_json
+        pantor::inja
+    )
+    target_compile_definitions(xray_review PUBLIC CODE_XRAY_HAS_EXPORTER=1)
+else()
+    target_sources(xray_review PRIVATE src/review/exporter_stub.cpp)
+endif()
+
 if(BUILD_TESTING)
     add_executable(review_tests tests/review/review_tests.cpp)
     target_link_libraries(review_tests PRIVATE xray_review)
@@ -75,6 +89,12 @@ if(BUILD_TESTING)
     add_executable(trend_tests tests/review/trend_tests.cpp)
     target_link_libraries(trend_tests PRIVATE xray_review)
     add_test(NAME trend COMMAND trend_tests)
+
+    if(CODE_XRAY_BUILD_EXPORT)
+        add_executable(export_tests tests/review/export_tests.cpp)
+        target_link_libraries(export_tests PRIVATE xray_review)
+        add_test(NAME export COMMAND export_tests)
+    endif()
 
     add_executable(history_test tests/history_test.cpp)
     target_link_libraries(history_test PRIVATE xray_history)

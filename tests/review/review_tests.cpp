@@ -1,6 +1,8 @@
 #include "review/matching.hpp"
 #include "review/rules.hpp"
+#ifdef CODE_XRAY_HAS_EXPORTER
 #include "review/exporter.hpp"
+#endif
 #include <cassert>
 #include <iostream>
 #include <string>
@@ -239,16 +241,26 @@ int main() {
     assert(rule->evaluate(revWithResolved) == true);
     assert(rule->evaluate(revWithRemovedCode) == false);
 
-    // 6. Експортери (заглушки першого PR повертають false, оскільки реальний експорт ще не реалізовано)
+#ifdef CODE_XRAY_HAS_EXPORTER
+    // 6. Експортери (поліморфний виклик через ReportExporter*)
     HtmlExporter htmlExporter;
     JsonExporter jsonExporter;
     ExportOptions opts;
-    opts.destination = "report.html";
+    auto testOut = std::filesystem::temp_directory_path() / "review_tests_report.html";
+    opts.destination = testOut;
+    opts.overwriteConfirmed = true;
 
     ReportExporter* exporter = &htmlExporter;
-    assert(exporter->write(ComparisonReport{}, opts) == false);
+    assert(exporter->write(ComparisonReport{}, opts) == true);
+    assert(std::filesystem::exists(testOut));
+    std::filesystem::remove(testOut);
+
+    opts.destination = std::filesystem::temp_directory_path() / "review_tests_report.json";
     exporter = &jsonExporter;
-    assert(exporter->write(ComparisonReport{}, opts) == false);
+    assert(exporter->write(ComparisonReport{}, opts) == true);
+    assert(std::filesystem::exists(opts.destination));
+    std::filesystem::remove(opts.destination);
+#endif
 
     std::cout << "All Review Module tests PASSED 100% successfully!\n";
     return 0;

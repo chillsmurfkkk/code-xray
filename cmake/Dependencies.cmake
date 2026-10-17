@@ -1,8 +1,6 @@
 find_package(Qt6 6.11.1 EXACT CONFIG REQUIRED COMPONENTS Widgets)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
 find_package(libgit2 CONFIG REQUIRED)
-find_package(nlohmann_json 3.12.0 EXACT CONFIG REQUIRED)
-find_package(inja 3.5.0 EXACT CONFIG REQUIRED)
 
 include(FetchContent)
 FetchContent_Declare(tree_sitter_cpp
