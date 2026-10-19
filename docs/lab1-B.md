@@ -1,64 +1,66 @@
-# B — evidence for Lab 1
+# Лабораторна робота №1 — B, Тригуба (`Kolya0685`)
 
-PR4 completes the planned core analysis symbols B01–B25. This checklist records
-code and demonstrations, not a promise of acceptance by the instructor.
+Тема: базові ідеї об'єктно-орієнтованого програмування. Проєкт: Code Xray.
 
-## Types and fields
+## Мета і виконана частина
 
-The module contains 10 behavior classes: `Metric`, `LengthMetric`, `NestingMetric`,
-`BranchCountMetric`, `Rule`, `LongFunctionRule`, `DeepNestingRule`,
-`ManyBranchesRule`, `MeanReducer`, `MaxReducer`. These include two inheritance
-hierarchies, each with one abstract base and three concrete classes.
+Модуль аналізу Code Xray вимірює метрики C++-функцій, застосовує профільні правила та повертає перевірений результат аналізу. Kolya0685 реалізував `src/analysis`: алгоритми довжини, вкладеності й розгалужень, правила порушень, JSON-профілі, рушій аналізу, агрегати та допоміжні операції для відбору й перевірки результатів. Парсер і типи сутностей коду на вході належать A; B споживає ці контракти, не приписуючи їх собі.
 
-Three additional result/profile types owned by B are the shared E0 contracts:
-`AnalysisProfile`, `MetricResult`, `Finding`. Their initial declarations predate
-PR1–PR4; their origin must remain explicit when discussing individual authorship.
-Their fields are used and validated by the implemented module:
+Звіт відповідає коду на `6ab06ce31638adc6bbf552932a728fd2145fc677`, станом на 2026-10-19. Власний інвентар із посиланнями на кожен тип, поле та реалізацію наведено в [реєстрі B](contributions/B.md).
 
-| Type | Fields | Count |
-|---|---|---:|
-| AnalysisProfile | id, schemaVersion, name, longFunctionLimit, nestingLimit, branchLimit, enabledRules | 7 |
-| MetricResult | entityId, metricId, value, validity, reason | 5 |
-| Finding | id, ruleId, entityId, observedValue, threshold, validity, explanation | 7 |
-| MeanReducer | mean_, count_ (private) | 2 |
-| MaxReducer | maximum_, entities_ (private) | 2 |
+## Відповідність вимогам
 
-Total in these five types: 23 fields, including 19 shared E0 contract fields.
-Inherited fields are not counted again. The instructor/team should confirm the
-attribution of shared contract design; do not count the same field for two authors.
+| Категорія | Обліковано за кодом B | Орієнтир ЛР №1 | Що пораховано |
+|---|---:|---:|---|
+| Типи | 13 | 9 | Облікована вибірка: 8 типів ієрархій, 2 reducer-класи й 3 власні типи результату/фільтра. |
+| Поля | 19 | 15 | Облікована вибірка полів `AggregateResult`, `CoverageSummary`, `FindingFilter`, `MeanReducer` і `MaxReducer`. |
+| Нетривіальні функції та методи | 34 | 25 | Облікована вибірка алгоритмів, перевірок та впорядкування; тривіальні forwarder-и й конструктори виключено. |
+| Ієрархії | 2 | 2 | `Metric` з трьома реалізаціями та `Rule` з трьома реалізаціями. |
+| Випадки поліморфізму | 3 | 3 | Два динамічні клієнти через базові класи й шаблонний агрегатор із двома типами reducer. |
 
-## Nontrivial implementation inventory
+Ці числа означають кількість реалізованих елементів у коді, а не рішення викладача про зарахування. `AnalysisProfile`, `MetricResult`, `Finding` і `AnalysisSnapshot` з’явилися у спільному E0-коміті A `c8ed63c17be2dbaaa0dc2ccdeccc6c6106e1573f`; їхні поля в облік B не включені. Такий поділ зберігає авторство контрактів окремо від авторства метрик, правил і рушія, які їх використовують.
 
-The following 33 implemented algorithms/helpers provide a conservative inventory.
-The three forwarding rule methods are recorded in B01–B25 but excluded from this
-count. Constructors, destructors, id/name/target getters, result finish methods,
-test helpers and simple error constructors are also excluded.
+## Основні алгоритми та крайові випадки
 
-| File | Implementations | Count |
-|---|---|---:|
-| metrics.cpp | isNestingConstruct, computeMaxNesting, computeBranchCount, LengthMetric::calculate, NestingMetric::calculate, BranchCountMetric::calculate | 6 |
-| rules.cpp | formatFindingExplanation, evaluateThreshold | 2 |
-| profiles.cpp | validLabel, requireKeys, nonnegativeInteger, uniqueId, validateProfile, decodeProfile, encodeProfile, loadProfile, saveProfile, duplicateProfile, isAnalysisCurrent | 11 |
-| engine.cpp | functions, functionIndex, buildMetricRegistry, resolveEnabledRules, makeAnalysisFingerprint, summarizeCoverage, analyze, filterFindings, groupFindingsByFile, rankFunctions, validateAnalysisResult | 11 |
-| aggregation.hpp | MeanReducer::accumulate, MaxReducer::accumulate, aggregateMetrics | 3 |
+`LengthMetric` рахує фізичні рядки функції від початкового до кінцевого рядка включно. `NestingMetric` рекурсивно знаходить максимальний рівень керувальних конструкцій, а `BranchCountMetric` рахує визначені проєктом точки розгалуження; обидва обходи пропускають піддерева лямбд і локальних типів. Для оголошення без тіла результат має стан `not_applicable`, а після помилки парсера стає `unavailable` без числового значення. Стан `syntactic_only` зберігається окремо, щоб число не виглядало точнішим за вихідний розбір.
 
-## Three independent polymorphic uses
+Три правила використовують спільний `evaluateThreshold`: воно перевіряє, що правило ввімкнене, metric належить функції, має числове значення та відповідає очікуваному типу, а потім порівнює його з порогом. Порушення виникає лише за строгого перевищення, тому рівність порогу не спрацьовує; `unavailable`, `not_applicable` і невідоме значення не перетворюються на нуль.
 
-1. Dynamic: `analyze()` invokes all three `calculate()` implementations through
-   `const Metric&` from a registry of `unique_ptr<Metric>`.
-2. Dynamic: `analyze()` invokes enabled `evaluate()` implementations through
-   `const Rule&` from a registry of `unique_ptr<Rule>`.
-3. Static: `analysis_demo` and engine tests instantiate the custom
-   `aggregateMetrics<Reducer>` algorithm with two different reducer types.
+JSON-профіль проходить перевірку версії схеми, обов’язкових і невідомих ключів, типів, дублікатів ключів, UTF-8 та невід’ємних порогів. Запис спершу створює тимчасовий файл і замінює ціль лише після успішного запису, тож помилка збереження повертається як `Error` і не повинна зіпсувати попередню версію. `analyze()` перевіряє джерело, профіль, ID функцій і скасування, після чого виконує метрики та ввімкнені правила. `validateAnalysisResult()` перевіряє повноту й узгодженість метрик, findings, fingerprint та Coverage, але не повторює алгоритми метрик для незалежної перевірки їхніх чисел.
 
-## Demonstration
+## Інкапсуляція
 
-Build and run the commands in [analysis-engine.md](analysis-engine.md). Explain
-why the demo's length is 61 and triggers a rule at 60, and why equality at 60 does
-not trigger it. Run the engine tests for disabled rules, incomplete results,
-profile edits, cancellation, average/max and integration with comparison/trend.
-Run profile tests for valid and damaged JSON and safe save failure.
+`MeanReducer` зберігає `mean_` і `count_` приватно та оновлює середнє онлайн у `accumulate`, що уникає переповнення від суми цілих значень. `MaxReducer` приховує `maximum_` і `entities_`, накопичує всі ID з максимальним значенням, а при завершенні сортує їх для стабільного результату. Структури `AggregateResult`, `CoverageSummary` і `FindingFilter` є відкритими типами-значеннями для обміну станом між операціями; вони не приховують поведінку, якою мав би керувати окремий об'єкт. Метрики й правила не мають змінного стану, тому їхні класи задають поведінку через інтерфейси.
 
-The GUI forms/controls/event handlers are Lab 2 work and are not counted here.
-Personal explanation of the algorithms and agreed authorship remain part of the
-Lab 1 defense even after all automated tests pass.
+## Ієрархії та поліморфні клієнти
+
+Ієрархія `Metric` має реалізації `LengthMetric`, `NestingMetric` і `BranchCountMetric`. Реєстр зберігає їх як `unique_ptr<Metric>`, а `analyze()` викликає `calculate()` через `const Metric&`, тож новий тип метрики підключається до клієнта без перемикача за конкретним класом.
+
+Ієрархія `Rule` має `LongFunctionRule`, `DeepNestingRule` і `ManyBranchesRule`. `analyze()` обходить активні правила як `const Rule&` та викликає `evaluate()` для відповідного metric ID, а профіль керує активацією без гілкування в клієнті за класом правила.
+
+Третій випадок — статичний поліморфізм `aggregateMetrics<Reducer>`. Один алгоритм обробляє `MetricResult` з `MeanReducer` або `MaxReducer`; обидва типи реально використовуються в `analysis_demo` і тестах. Це окремий compile-time механізм на додачу до двох віртуальних інтерфейсів.
+
+## Відтворення і демонстрація
+
+Спільна перевірка на Windows x64 з MSVC v143 зібрала цілі проєкту, а всі 13 CTest suites пройшли після перенаправлення тимчасових файлів із sandbox у `build/lab1-verification-temp`. Серед пройдених suite були `analysis`, `analysis_engine` та `profiles`; журнал, точні команди, результати й примітка про перший запуск містяться у [lab1-verification.md](lab1-verification.md). Окремий запуск `analysis_demo` також завершився з кодом 0 і надрукував три метрики, одне порушення та середнє/максимум 61 рядок.
+
+Щоб повторити повну збірку, вибрані B suites та демо в PowerShell з кореня репозиторію:
+
+```powershell
+cmake --preset windows-x64
+cmake --build --preset windows-x64
+$labTemp = Join-Path (Get-Location) 'build/lab1-verification-temp'
+New-Item -ItemType Directory -Force -Path $labTemp | Out-Null
+$env:TEMP = $labTemp
+$env:TMP = $labTemp
+ctest --preset windows-x64 -R '^(analysis|analysis_engine|profiles)$' --output-on-failure
+& ./build/windows-x64/Debug/analysis_demo.exe
+```
+
+У демо довжина `process` дорівнює 61 за порогу 60, тому правило створює finding; рівність 60 перевіряється окремими тестовими сценаріями й не створює порушення. `analysis_demo` використовує підготовлений об'єкт дерева парсера, отже демонструє незалежний модуль аналізу, а не розбір довільного файла C++.
+
+Авторство видно в чотирьох комітах Kolya0685: `5fb5a31c906bede7f777bbd2cbe718a348d4611f` додає довжину та перше правило, `6130f62248aa2b6b830c44b6fa45ac4b985789be` — вкладеність і розгалуження, `327d2921276f6d6365cddb084587d45e09255a69` — правила й JSON-профілі, `0387bbd78deba94609b2fb98a78c4673adee98bd` — рушій і агрегати. Різниця від E0 та `git blame` підтверджують, що контракти у `src/analysis/types.hpp` походять від A, а реалізація в окремих файлах `src/analysis` — від B.
+
+## Висновок і межі роботи
+
+У вибраній для ЛР №1 інвентаризації обліковано 13 типів, 19 полів, 34 нетривіальні реалізації, дві ієрархії та три клієнтські випадки поліморфізму. Окремо реєстр зазначає додаткові власні допоміжні типи й код, які не включені в ці підсумки. Код не містить запланованих для B чотирьох GUI-форм, 20 контролів і 10 обробників ЛР №2, тому вони не включені. Звіт описує внесок, який підтверджується кодом та історією, і не приписує автору неперевірений особистий досвід.
