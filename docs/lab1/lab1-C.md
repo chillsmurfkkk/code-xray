@@ -11,7 +11,7 @@
 контрольних даних. Доступ до справжнього репозиторію й завантаження історичних
 файлів ще не реалізовані, тому цей звіт описує часткове виконання ЛР №1.
 
-Походження коду й поелементний облік наведено в [реєстрі C](contributions/C.md).
+Походження коду й поелементний облік наведено в [реєстрі C](../contributions/C.md).
 `HistoryRequest`, `CommitRecord`, `ChangeRecord`, `RepositorySpec`,
 `HistoryResult` і спільні контракти вже були в E0 від A; форматування цих
 оголошень не переносить їхнє авторство до C. `Oid` є alias і не рахується типом.
@@ -53,7 +53,7 @@ RevisionSelection
 └── PeriodicSelection
 ```
 
-У [history_test.cpp](../tests/history_test.cpp) клієнт
+У [history_test.cpp](../../tests/history_test.cpp) клієнт
 `executeQuery(const HistoryQuery&, ...)` викликає `apply` через базове
 посилання, а `executeSelection(const RevisionSelection&, ...)` викликає
 `select` через інший базовий інтерфейс. Це два незалежні динамічні випадки.
@@ -86,7 +86,7 @@ ctest --preset contracts-only -R '^history_test$' --output-on-failure
 кількісні вимоги ЛР №1 ще не виконані. Бракує щонайменше 2 типів, 8 полів
 і 18 нетривіальних реалізацій за поточним обліком.
 
-`query()` і `loadSnapshot()` у [api.hpp](../src/history/api.hpp) мають лише
+`query()` і `loadSnapshot()` у [api.hpp](../../src/history/api.hpp) мають лише
 декларації. Немає реалізацій libgit2, читання tree/blob, first-parent історії,
 diff/root/merge-поведінки, координатора або GUI історії. Підключена бібліотека
 й успішний тест на фіктивних даних цих частин не замінюють. Ретроспективу
