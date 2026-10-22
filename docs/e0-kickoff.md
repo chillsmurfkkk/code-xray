@@ -1,6 +1,7 @@
 # E0: спільний старт Code Xray
 
-Платформа команди — **Windows x64**. Погоджений стек: **C++20, Qt 6 Widgets,
+Платформа E0 — **Windows x64**; для розробки на **macOS / Apple Silicon** додано пресети,
+повний запуск яких ще має перевірити розробник на Mac. Погоджений стек: **C++20, Qt 6 Widgets,
 CMake, Tree-sitter із C++ граматикою, libgit2, nlohmann/json та inja**.
 E0 додає порожній застосунок, компільовані контракти й контрольні дані.
 Реалізація аналізу, Git-історії, порівняння та сторінок A–D починається наступними PR.
@@ -40,7 +41,7 @@ ctest --preset windows-x64
 | Залежність | Зафіксована версія |
 |---|---|
 | vcpkg baseline | `776a31fc8d3659de2c9cca4364062be5bbdf3857` |
-| Qt / qtbase | `6.11.1` з Widgets і windeployqt |
+| Qt / qtbase | `6.11.1` з Widgets; windeployqt лише на Windows |
 | Tree-sitter | `0.26.9` |
 | tree-sitter-cpp | `v0.23.4`, commit `f41e1a044c8a84ea9fa8577fdd2eab92ec96de02` |
 | libgit2 | `1.9.4#1`, pcre2; без SSH/HTTPS для локального сценарію |
@@ -61,6 +62,58 @@ ctest --preset contracts-only
 ```
 
 Він перевіряє лише C++ типи й контрольні дані; успіх цього режиму не підтверджує запуск Qt.
+
+### macOS
+
+Потрібні Xcode з вибраним активним toolchain, CMake 3.25+, Ninja, Git і vcpkg.
+Для Qt 6.11 потрібні macOS 13+ та Xcode 15+ з macOS 14 SDK або новішим;
+конфігурації наведені в [документації Qt](https://doc.qt.io/qt-6.11/macos.html).
+Перевір активний Xcode командою `xcode-select -p` і доступність SDK командою
+`xcrun --sdk macosx --show-sdk-path`. Якщо CMake та Ninja ще не встановлені,
+їх можна встановити через Homebrew: `brew install cmake ninja`.
+
+Якщо vcpkg ще немає, виконай у терміналі macOS:
+
+```sh
+git clone https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+git -C "$HOME/vcpkg" checkout 776a31fc8d3659de2c9cca4364062be5bbdf3857
+"$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+export VCPKG_ROOT="$HOME/vcpkg"
+```
+
+Для наявного vcpkg задай `VCPKG_ROOT` на його каталог. Залежності встановлюються
+автоматично під час конфігурації, з тим самим baseline, що й на Windows.
+Початкове збирання Qt та решти бібліотек потребує мережі, місця на диску й часу.
+
+Повний preset `macos-arm64` використовує vcpkg triplet `arm64-osx` та архітектуру
+`arm64`. На Apple Silicon використовуй нативний термінал без Rosetta.
+З кореня репозиторію:
+
+```sh
+cmake --preset macos-arm64
+cmake --build --preset macos-arm64
+ctest --preset macos-arm64
+./build/macos-arm64/code-xray
+```
+
+Пресет використовує Ninja, `CMAKE_BUILD_TYPE=Debug`, окремий каталог
+збірки та створює `compile_commands.json` для редактора. Він включає GUI,
+парсер, профілі/рушій, експорт і тести; `windeployqt` запитується лише на Windows.
+Команда запуску відкриває виконуваний файл із каталогу збірки; створення
+самодостатнього `.app`/`.dmg` для поширення цими пресетами не налаштоване.
+
+Для роботи без сторонніх бібліотек:
+
+```sh
+cmake --preset macos-contracts
+cmake --build --preset macos-contracts
+ctest --preset macos-contracts
+```
+
+Цей режим вимикає GUI, Tree-sitter-парсер, JSON-профілі/рушій і реальний експорт,
+тому його успіх не замінює перевірку повного preset. Повна macOS-збірка та запуск
+GUI ще очікують перевірки на Mac. Для приймання запиши архітектуру, версії Xcode
+і CMake та результати configure/build/CTest і ручного запуску вікна.
 
 ## Модулі та власники
 

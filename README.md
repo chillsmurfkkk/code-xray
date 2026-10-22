@@ -35,6 +35,23 @@ ctest --preset windows-x64
 
 Для зміни лише контрактів доступний preset `contracts-only`, який не потребує Qt та інших сторонніх бібліотек.
 
+Для macOS на Apple Silicon додано повний Debug-пресет `macos-arm64`,
+який включає Qt GUI, парсер, JSON-профілі, експорт і тести.
+Потрібні Xcode, CMake 3.25+, Ninja, Git та vcpkg із налаштованим `VCPKG_ROOT`.
+З кореня репозиторію на Apple Silicon:
+
+```sh
+cmake --preset macos-arm64
+cmake --build --preset macos-arm64
+ctest --preset macos-arm64
+./build/macos-arm64/code-xray
+```
+
+Полегшений `macos-contracts` залишається для роботи без сторонніх бібліотек;
+він не збирає GUI, парсер, JSON-профілі/рушій і реальний експорт.
+Повна macOS-збірка ще очікує перевірки розробником на Mac; підготовка середовища
+описана в [інструкції збірки](docs/e0-kickoff.md#macos).
+
 ## Поточний стан
 
 Звірено з `main` на коміті `6ab06ce` від 2026-10-17; документацію й перевірки
