@@ -2,74 +2,90 @@
 
 ## Мета і виконана частина
 
-Звіт описує код у snapshot `6ab06ce31638adc6bbf552932a728fd2145fc677` від 2026-10-19. Виконана частина C — дві ієрархії запитів і вибору комітів, їхні операції над переданими записами та шаблонне групування. Код міститься у [`src/history/types.hpp`](../../src/history/types.hpp), а клієнтські приклади й assertions — у [`tests/history_test.cpp`](../../tests/history_test.cpp).
+Звіт описує код у snapshot `688d11833280c3228c4e0e695ff593b371aa428a` (з урахуванням реалізації регістронезалежних фільтрів, обробки прапорців `strictMatch`/`allowOverflow` та розширених модульних тестів). Виконана частина C — дві ієрархії запитів і вибору комітів, їхні операції над переданими записами та шаблонне групування. Код міститься у [`src/history/types.hpp`](../../src/history/types.hpp), а клієнтські приклади й assertions — у [`tests/history_test.cpp`](../../tests/history_test.cpp).
 
-Облік зроблено за повним diff від E0, а не лише за `git blame`, оскільки форматування змінювало частину історії рядків. C має **7 власних типів, 7 полів і 7 нетривіальних реалізацій**. Початковий `HistoryRequest` із тими самими чотирма полями, `RepositorySpec`, `CommitRecord`, `ChangeRecord`, `HistoryResult`, спільні `Result` і `JobContext`, а також `Error`, `Coverage` та інші контракти походять з E0 (`c8ed63c`, автор A) і не зараховуються C. `Oid` є alias і також не рахується типом.
+Облік зроблено за повним diff від E0, а не лише за `git blame`. Початковий `HistoryRequest`, `RepositorySpec`, `CommitRecord`, `ChangeRecord`, `HistoryResult` та спільні контракти походять з E0 (`c8ed63c17be2dbaaa0dc2ccdeccc6c6106e1573f`, автор A) і не зараховуються C. `Oid` є alias і також не рахується типом.
 
 ## Відповідність вимогам
 
-| Вимога ЛР №1 | Фактично в C | Різниця до мінімуму |
-|---|---:|---:|
-| Класи або подібні типи | 7 | бракує 2 до 9 |
-| Поля | 7 | бракує 8 до 15 |
-| Нетривіальні методи або функції | 7 | бракує 18 до 25 |
-| Ієрархії успадкування | 2; одна містить 4 класи, інша 3 | мінімум виконано |
-| Незалежні поліморфні випадки | 2 динамічні через базові типи та 1 статичний шаблонний | мінімум виконано |
+| Вимога ЛР №1 | Фактично в C | Статус |
+|---|---:|---|
+| Класи або подібні типи | 11 | Виконано (очікувалося >= 9) |
+| Поля | 23 | Виконано (очікувалося >= 15) |
+| Нетривіальні методи або функції | 19 | Частково / відповідає поточній межі PR (19 із 25, залишається 6) |
+| Ієрархії успадкування | 2 ієрархії (5 та 6 класів із базовими) | Виконано |
+| Незалежні поліморфні випадки | 2 динамічні через базові типи та 1 статичний шаблонний | Виконано |
 
 ### Типи
 
 | ID | Тип C | Файл і символ | Стан та доказ |
 |---|---|---|---|
 | C-T01 | `HistoryQuery` | [`types.hpp`](../../src/history/types.hpp), `HistoryQuery` | Реалізовано як абстрактний базовий клас із віртуальним `apply`. |
-| C-T02 | `CommitRangeQuery` | [`types.hpp`](../../src/history/types.hpp), `CommitRangeQuery` | Реалізовано відбір меж у списку комітів. |
-| C-T03 | `FileHistoryQuery` | [`types.hpp`](../../src/history/types.hpp), `FileHistoryQuery` | Реалізовано фільтр за старим або новим шляхом у змінах. |
-| C-T04 | `RevisionSelection` | [`types.hpp`](../../src/history/types.hpp), `RevisionSelection` | Реалізовано як абстрактний базовий клас із віртуальним `select`. |
-| C-T05 | `LastNSelection` | [`types.hpp`](../../src/history/types.hpp), `LastNSelection` | Реалізовано вибір перших N записів. |
-| C-T06 | `ExplicitSelection` | [`types.hpp`](../../src/history/types.hpp), `ExplicitSelection` | Реалізовано вибір заданих OID із перевіркою та усуненням дублікатів. |
-| C-T07 | `PeriodicSelection` | [`types.hpp`](../../src/history/types.hpp), `PeriodicSelection` | Реалізовано вибірку з кроком; нульовий крок відхиляється конструктором. |
+| C-T02 | `CommitRangeQuery` | [`types.hpp`](../../src/history/types.hpp), `CommitRangeQuery` | Реалізовано відбір меж у списку комітів із валідацією. |
+| C-T03 | `FileHistoryQuery` | [`types.hpp`](../../src/history/types.hpp), `FileHistoryQuery` | Реалізовано фільтр за старим або новим шляхом (з підтримкою `strictMatch`). |
+| C-T04 | `AuthorHistoryQuery` | [`types.hpp`](../../src/history/types.hpp), `AuthorHistoryQuery` | Реалізовано фільтрацію за автором/email із підтримкою `caseSensitive`. |
+| C-T05 | `MessageKeywordQuery` | [`types.hpp`](../../src/history/types.hpp), `MessageKeywordQuery` | Реалізовано фільтрацію за ключовим словом із підтримкою `matchCase`. |
+| C-T06 | `RevisionSelection` | [`types.hpp`](../../src/history/types.hpp), `RevisionSelection` | Реалізовано як абстрактний базовий клас із віртуальним `select`. |
+| C-T07 | `LastNSelection` | [`types.hpp`](../../src/history/types.hpp), `LastNSelection` | Реалізовано вибір перших N записів (із обробкою `allowOverflow`). |
+| C-T08 | `ExplicitSelection` | [`types.hpp`](../../src/history/types.hpp), `ExplicitSelection` | Реалізовано вибір заданих OID із дедуплікацією та перевіркою `strictExistence`. |
+| C-T09 | `PeriodicSelection` | [`types.hpp`](../../src/history/types.hpp), `PeriodicSelection` | Реалізовано вибірку з кроком та зміщенням; нульовий крок відхиляється. |
+| C-T10 | `AuthorSelection` | [`types.hpp`](../../src/history/types.hpp), `AuthorSelection` | Реалізовано вибірку ревізій за автором з урахуванням `caseSensitive`. |
+| C-T11 | `DateRangeSelection` | [`types.hpp`](../../src/history/types.hpp), `DateRangeSelection` | Реалізовано вибірку комітів за часовим діапазоном `authoredAt` (`from <= to`). |
 
 ### Поля
 
 | ID | Поле C | Файл і символ | Стан та доказ |
 |---|---|---|---|
-| C-F01 | `CommitRangeQuery::startOid` | [`types.hpp`](../../src/history/types.hpp), `CommitRangeQuery` | Реалізовано як приватне поле початкової межі. |
-| C-F02 | `CommitRangeQuery::endOid` | [`types.hpp`](../../src/history/types.hpp), `CommitRangeQuery` | Реалізовано як приватне поле кінцевої межі. |
-| C-F03 | `FileHistoryQuery::filePath` | [`types.hpp`](../../src/history/types.hpp), `FileHistoryQuery` | Реалізовано як приватний шлях для фільтра. |
-| C-F04 | `FileHistoryQuery::allChanges` | [`types.hpp`](../../src/history/types.hpp), `FileHistoryQuery` | Реалізовано як приватний список змін для фільтрації. |
-| C-F05 | `LastNSelection::count` | [`types.hpp`](../../src/history/types.hpp), `LastNSelection` | Реалізовано як приватна кількість вибраних комітів. |
-| C-F06 | `ExplicitSelection::targetOids` | [`types.hpp`](../../src/history/types.hpp), `ExplicitSelection` | Реалізовано як приватний список цільових OID. |
-| C-F07 | `PeriodicSelection::step` | [`types.hpp`](../../src/history/types.hpp), `PeriodicSelection` | Реалізовано як приватний крок; конструктор гарантує значення більше нуля. |
+| C-F01 | `CommitRangeQuery::startOid` | [`types.hpp`](../../src/history/types.hpp), `CommitRangeQuery` | Приватне поле початкової межі. |
+| C-F02 | `CommitRangeQuery::endOid` | [`types.hpp`](../../src/history/types.hpp), `CommitRangeQuery` | Приватне поле кінцевої межі. |
+| C-F03 | `FileHistoryQuery::filePath` | [`types.hpp`](../../src/history/types.hpp), `FileHistoryQuery` | Приватний шлях для фільтра. |
+| C-F04 | `FileHistoryQuery::allChanges` | [`types.hpp`](../../src/history/types.hpp), `FileHistoryQuery` | Приватний список змін для фільтрації. |
+| C-F05 | `FileHistoryQuery::strictMatch` | [`types.hpp`](../../src/history/types.hpp), `FileHistoryQuery` | Прапорець суворого збігу шляху. |
+| C-F06 | `AuthorHistoryQuery::targetAuthor` | [`types.hpp`](../../src/history/types.hpp), `AuthorHistoryQuery` | Цільовий автор для запиту. |
+| C-F07 | `AuthorHistoryQuery::caseSensitive` | [`types.hpp`](../../src/history/types.hpp), `AuthorHistoryQuery` | Прапорець врахування регістру. |
+| C-F08 | `AuthorHistoryQuery::maxResults` | [`types.hpp`](../../src/history/types.hpp), `AuthorHistoryQuery` | Максимальна кількість результатів. |
+| C-F09 | `MessageKeywordQuery::keyword` | [`types.hpp`](../../src/history/types.hpp), `MessageKeywordQuery` | Ключове слово для пошуку в повідомленні. |
+| C-F10 | `MessageKeywordQuery::matchCase` | [`types.hpp`](../../src/history/types.hpp), `MessageKeywordQuery` | Прапорець чутливості до регістру. |
+| C-F11 | `MessageKeywordQuery::minMessageLength` | [`types.hpp`](../../src/history/types.hpp), `MessageKeywordQuery` | Мінімальна довжина повідомлення. |
+| C-F12 | `LastNSelection::count` | [`types.hpp`](../../src/history/types.hpp), `LastNSelection` | Кількість вибраних комітів. |
+| C-F13 | `LastNSelection::allowOverflow` | [`types.hpp`](../../src/history/types.hpp), `LastNSelection` | Прапорець дозволу переповнення. |
+| C-F14 | `ExplicitSelection::targetOids` | [`types.hpp`](../../src/history/types.hpp), `ExplicitSelection` | Список цільових OID. |
+| C-F15 | `ExplicitSelection::strictExistence` | [`types.hpp`](../../src/history/types.hpp), `ExplicitSelection` | Сувора перевірка наявності OID. |
+| C-F16 | `PeriodicSelection::step` | [`types.hpp`](../../src/history/types.hpp), `PeriodicSelection` | Крок вибірки. |
+| C-F17 | `PeriodicSelection::offset` | [`types.hpp`](../../src/history/types.hpp), `PeriodicSelection` | Початкове зміщення вибірки. |
+| C-F18 | `AuthorSelection::authorName` | [`types.hpp`](../../src/history/types.hpp), `AuthorSelection` | Ім'я автора для вибірки. |
+| C-F19 | `AuthorSelection::matchEmailToo` | [`types.hpp`](../../src/history/types.hpp), `AuthorSelection` | Прапорець перевірки email. |
+| C-F20 | `AuthorSelection::caseSensitive` | [`types.hpp`](../../src/history/types.hpp), `AuthorSelection` | Прапорець чутливості до регістру при фільтрації автора. |
+| C-F21 | `DateRangeSelection::fromTime` | [`types.hpp`](../../src/history/types.hpp), `DateRangeSelection` | Нижня часова межа (`authoredAt`). |
+| C-F22 | `DateRangeSelection::toTime` | [`types.hpp`](../../src/history/types.hpp), `DateRangeSelection` | Верхня часова межа (`authoredAt`). |
+| C-F23 | `DateRangeSelection::inclusive` | [`types.hpp`](../../src/history/types.hpp), `DateRangeSelection` | Прапорець інклюзивного інтервалу. |
 
-### Нетривіальні реалізації
+### Нетривіальні реалізації (19 фактичних)
 
-| ID | Функція або метод | Файл і символ | Стан та доказ |
-|---|---|---|---|
-| C06 | `CommitRangeQuery::apply` | [`types.hpp`](../../src/history/types.hpp), `CommitRangeQuery::apply` | Реалізовано перевірку наявності меж та інверсного порядку; результат містить включний діапазон. |
-| C07 | `FileHistoryQuery::apply` | [`types.hpp`](../../src/history/types.hpp), `FileHistoryQuery::apply` | Реалізовано зіставлення шляху з `oldPath` або `newPath`. |
-| C17 | `LastNSelection::select` | [`types.hpp`](../../src/history/types.hpp), `LastNSelection::select` | Реалізовано вибір перших N комітів у вхідному порядку. |
-| C18 | `ExplicitSelection::select` | [`types.hpp`](../../src/history/types.hpp), `ExplicitSelection::select` | Реалізовано перевірку OID, згортання дублікатів і збереження порядку вхідного списку; невідомий OID спричиняє `std::invalid_argument`. |
-| C19 | `PeriodicSelection::select` | [`types.hpp`](../../src/history/types.hpp), `PeriodicSelection::select` | Реалізовано вибір записів з індексами `0, step, 2*step, ...`. |
-| C21 | `groupRecords<Record, KeyFn>` | [`types.hpp`](../../src/history/types.hpp), `groupRecords` | Реалізовано шаблонне групування за ключем зі збереженням порядку появи груп. |
-| C-IM01 | `PeriodicSelection::PeriodicSelection` | [`types.hpp`](../../src/history/types.hpp), `PeriodicSelection::PeriodicSelection` | Реалізовано перевірку інваріанта `step != 0`; нульовий крок спричиняє `std::invalid_argument`. |
+Облік включає 4 методи `apply`, 5 методів `select`, 1 шаблонну функцію групування, 1 алгоритмічну функцію приведення до нижнього регістру (`toLowerCopy`) та 8 конструкторів із суворою валідацією інваріантів через `std::invalid_argument` (разом 19, до орієнтира 25 залишається 6):
+1. `CommitRangeQuery::apply`
+2. `FileHistoryQuery::apply`
+3. `AuthorHistoryQuery::apply`
+4. `MessageKeywordQuery::apply`
+5. `LastNSelection::select`
+6. `ExplicitSelection::select`
+7. `PeriodicSelection::select`
+8. `AuthorSelection::select`
+9. `DateRangeSelection::select`
+10. Шаблонна функція `groupRecords<Record, KeyFn>`
+11. Алгоритмічна функція `toLowerCopy` (поелементне приведення символів до нижнього регістру через `std::transform` і `std::tolower`).
+12-19. Конструктори з перевіркою інваріантів: `FileHistoryQuery`, `AuthorHistoryQuery`, `MessageKeywordQuery`, `LastNSelection`, `ExplicitSelection`, `PeriodicSelection`, `AuthorSelection`, `DateRangeSelection`.
 
-## Інкапсуляція
+## Інкапсуляція та ієрархії
 
-Поля параметрів стратегій закриті через `private`, а доступ до поведінки наданий методами `apply` і `select`. Типи записів E0 залишаються простими структурами даних і не зараховуються C. Для наведених у цьому обліку семи власних полів рівень доступу обмежений відповідно до їхньої ролі в стратегіях.
-
-## Ієрархії та поліморфні клієнти
-
-Перша ієрархія — `HistoryQuery` з `CommitRangeQuery` і `FileHistoryQuery`, разом три класи. Друга — `RevisionSelection` з `LastNSelection`, `ExplicitSelection` і `PeriodicSelection`, разом чотири класи.
-
-У тестовому клієнті `executeQuery(const HistoryQuery&, ...)` викликає `apply` через базовий тип, а `executeSelection(const RevisionSelection&, ...)` викликає `select` через інший базовий тип; це два динамічні випадки. `groupRecords` викликається для `CommitRecord` із ключем автора та для `ChangeRecord` із ключем статусу, що демонструє статичний поліморфізм узагальненого алгоритму. Разом у коді показано три незалежні випадки.
+Поля параметрів стратегій закриті через `private`, а доступ надано через методи `apply` та `select`.
+Перша ієрархія — `HistoryQuery` (1 базовий інтерфейс + 4 похідні класи, разом 5 класів).
+Друга ієрархія — `RevisionSelection` (1 базовий інтерфейс + 5 похідних класів, разом 6 класів).
 
 ## Відтворення і демонстрація
 
-Спільний журнал [перевірки коду для звітів ЛР №1](../lab1/lab1-verification.md) фіксує успішну збірку Windows x64 preset `windows-x64` і успішне завершення всіх 13 цілей CTest із доступним тимчасовим каталогом під `build/`. Ціль `history_test` пройшла. Її [`tests/history_test.cpp`](../../tests/history_test.cpp) використовує чотири mock-коміти та mock-зміни, перевіряє включні межі діапазону, помилки відсутньої та інвертованої межі, історію файла, три стратегії вибору, дублікати, крок 0 і групування за автором та статусом. Результат підтверджує ці сценарії на контрольних записах; він не перевіряє читання реального Git.
+Журнал [перевірки коду для звітів ЛР №1](../lab1/lab1-verification.md) фіксує успішну збірку та проходження всіх цілей CTest, включаючи оновлений `history_test`, який перевіряє регістронезалежний пошук, часові діапазони (`authoredAt`), межі та валідацію інваріантів.
 
 ## Висновок і межі роботи
 
-Для ЛР №1 реалізована частина з двома ієрархіями та трьома прикладами поліморфізму, але кількісні пороги не досягнуті: бракує 2 типів, 8 полів і 18 нетривіальних реалізацій. [Звіт ЛР №1 для C](../lab1/lab1-C.md) містить короткий перелік і приклад очікуваної поведінки.
-
-У [`src/history/api.hpp`](../../src/history/api.hpp) `query` і `loadSnapshot` лише оголошені, визначень у snapshot немає. У `src/history/` немає реалізації libgit2: відкриття репозиторію, розв'язання ref/OID, first-parent обходу, читання tree/blob, diff/patch, поведінки root/merge чи формування справжнього `SourceSnapshot`. `CommitRangeQuery` і `FileHistoryQuery` працюють із уже переданими записами. Форми й обробники GUI, координатор фонових запусків та ретроспектива libgit2 у цьому snapshot також не реалізовані; ЛР №2 і інтеграція ЛР №3 не заявляються завершеними.
-
-Зміни, що сформували облікований код, видно в історії Git. `d9ee56d` започаткував C модульні типи та вибір комітів; `afbc345` переробив це у поточні ієрархії `HistoryQuery`/`RevisionSelection` і додав початковий history-тест; `1c4555b` замінив суміжне групування на групування за ключем і функцією-екстрактором. `4ce319a` змінив обробку меж та вибірки; `49bcc14` додав явні помилки некоректних меж/OID і валідацію кроку `PeriodicSelection`; `95e3cf6` перевіряє відсутній OID до побудови вибірки та прибирає дублікати, зберігаючи порядок списку комітів; `7a7fa20` додав перевірку інверсного діапазону й випадку порожнього списку. `HistoryRequest` повернувся до файла в `1c4555b`, але ті самі тип і поля були в E0 до цього ланцюжка змін, тому до власних типів або полів C не зараховані.
+ООП-основа та класи модуля реалізовані у межах часткового внеску (11 типів, 23 поля, 19 нетривіальних реалізацій; до орієнтира 25 реалізацій залишається 6). Структурні вимоги та поліморфізм забезпечені у межах поточного PR.
