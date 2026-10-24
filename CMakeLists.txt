@@ -150,7 +150,11 @@ if(CODE_XRAY_BUILD_APP)
     )
 
     # Build the Qt application
-    qt_add_executable(code-xray WIN32 src/app/main.cpp)
+    qt_add_executable(code-xray WIN32
+        src/app/main.cpp
+        src/app/main_window.cpp
+        src/app/main_window.hpp
+    )
     target_link_libraries(code-xray PRIVATE Qt6::Widgets xray_history xray_review)
 
     if(WIN32)
