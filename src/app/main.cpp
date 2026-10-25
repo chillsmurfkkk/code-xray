@@ -9,7 +9,17 @@
 #include "ui/review/ExportPage.hpp"
 #include "ui/review/review_fixtures.hpp"
 
+// Фільтр повідомлень Qt для ігнорування внутрішніх асертів Win32-курсорів у Debug-режимі
+static void customMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg) {
+    if (msg.contains("Format_Mono") || msg.contains("qpixmap_win.cpp")) {
+        return; // Ігноруємо відомий внутрішній баг Qt 6 на Windows 11
+    }
+    QByteArray localMsg = msg.toLocal8Bit();
+    fprintf(stderr, "%s\n", localMsg.constData());
+}
+
 int main(int argc, char* argv[]) {
+    qInstallMessageHandler(customMessageHandler);
     qputenv("QT_ENABLE_HIGHDPI_SCALING", "1");
     QApplication application(argc, argv);
 

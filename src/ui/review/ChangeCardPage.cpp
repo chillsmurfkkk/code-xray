@@ -57,6 +57,7 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     auto* codeSplitter = new QSplitter(Qt::Horizontal);
     codeSplitter->setHandleWidth(6);
     codeSplitter->setChildrenCollapsible(false);
+    codeSplitter->setStyleSheet("QSplitter::handle { background-color: #504945; }");
 
     auto* beforeBox = new QVBoxLayout;
     beforeBox->addWidget(new QLabel(QString::fromUtf8("Код «до»")));
