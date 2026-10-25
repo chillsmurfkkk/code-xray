@@ -150,7 +150,18 @@ if(CODE_XRAY_BUILD_APP)
     )
 
     # Build the Qt application
-    qt_add_executable(code-xray WIN32 src/app/main.cpp)
+    qt_add_executable(code-xray WIN32
+        src/app/main.cpp
+        src/ui/review/ComparisonPage.cpp
+        src/ui/review/ComparisonPage.hpp
+        src/ui/review/TrendPage.cpp
+        src/ui/review/TrendPage.hpp
+        src/ui/review/ChangeCardPage.cpp
+        src/ui/review/ChangeCardPage.hpp
+        src/ui/review/ExportPage.cpp
+        src/ui/review/ExportPage.hpp
+    )
+    set_target_properties(code-xray PROPERTIES AUTOMOC ON)
     target_link_libraries(code-xray PRIVATE Qt6::Widgets xray_history xray_review)
 
     if(WIN32)
