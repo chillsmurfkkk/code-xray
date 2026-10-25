@@ -23,12 +23,6 @@ static void customMessageHandler(QtMsgType type, const QMessageLogContext& conte
 }
 
 int main(int argc, char* argv[]) {
-#ifdef _WIN32
-    // Вимикаємо діалогові вікна "Debug Error!" від CRT assert'ів
-    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
-    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
-#endif
-    qInstallMessageHandler(customMessageHandler);
     qputenv("QT_ENABLE_HIGHDPI_SCALING", "1");
     QApplication application(argc, argv);
 
