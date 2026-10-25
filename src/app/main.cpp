@@ -13,18 +13,12 @@
 #include <crtdbg.h>
 #endif
 
-// Фільтр повідомлень Qt для ігнорування внутрішніх асертів Win32-курсорів у Debug-режимі
-static void customMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg) {
-    if (msg.contains("Format_Mono") || msg.contains("qpixmap_win.cpp")) {
-        return; // Ігноруємо відомий внутрішній баг Qt 6 на Windows 11
-    }
-    QByteArray localMsg = msg.toLocal8Bit();
-    fprintf(stderr, "%s\n", localMsg.constData());
-}
 
 int main(int argc, char* argv[]) {
     qputenv("QT_ENABLE_HIGHDPI_SCALING", "1");
+    qputenv("QT_LOGGING_RULES", "qt.gui.image.warning=false;qt.gui.image.debug=false");
     QApplication application(argc, argv);
+    QApplication::setStyle("Fusion");
 
     QMainWindow window;
     window.setWindowTitle(QString::fromUtf8("Code Xray — Порівняння та звіти (Review)"));
