@@ -150,14 +150,30 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
     beforeCodeEdit_->clear();
     afterCodeEdit_->clear();
 
-    if (!item.sourceRefs.empty()) {
-        const auto& ref = item.sourceRefs.front();
-        beforeCodeEdit_->setPlainText(extractCode(ref.sourceId, ref.range));
-        currentPath_ = QString::fromStdString(ref.relativePath);
-    }
-    if (item.sourceRefs.size() > 1) {
-        const auto& ref = item.sourceRefs[1];
-        afterCodeEdit_->setPlainText(extractCode(ref.sourceId, ref.range));
+    if (item.kind == ReviewKind::added) {
+        beforeCodeEdit_->setPlainText(QString::fromUtf8("// (функції ще не існувало у версії «до»)"));
+        if (!item.sourceRefs.empty()) {
+            const auto& ref = item.sourceRefs.front();
+            afterCodeEdit_->setPlainText(extractCode(ref.sourceId, ref.range));
+            currentPath_ = QString::fromStdString(ref.relativePath);
+        }
+    } else if (item.kind == ReviewKind::removed) {
+        if (!item.sourceRefs.empty()) {
+            const auto& ref = item.sourceRefs.front();
+            beforeCodeEdit_->setPlainText(extractCode(ref.sourceId, ref.range));
+            currentPath_ = QString::fromStdString(ref.relativePath);
+        }
+        afterCodeEdit_->setPlainText(QString::fromUtf8("// (функцію видалено у версії «після»)"));
+    } else {
+        if (!item.sourceRefs.empty()) {
+            const auto& ref = item.sourceRefs.front();
+            beforeCodeEdit_->setPlainText(extractCode(ref.sourceId, ref.range));
+            currentPath_ = QString::fromStdString(ref.relativePath);
+        }
+        if (item.sourceRefs.size() > 1) {
+            const auto& ref = item.sourceRefs[1];
+            afterCodeEdit_->setPlainText(extractCode(ref.sourceId, ref.range));
+        }
     }
 
     // --- Метрики ---

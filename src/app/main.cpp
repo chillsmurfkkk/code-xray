@@ -9,6 +9,10 @@
 #include "ui/review/ExportPage.hpp"
 #include "ui/review/review_fixtures.hpp"
 
+#ifdef _WIN32
+#include <crtdbg.h>
+#endif
+
 // Фільтр повідомлень Qt для ігнорування внутрішніх асертів Win32-курсорів у Debug-режимі
 static void customMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg) {
     if (msg.contains("Format_Mono") || msg.contains("qpixmap_win.cpp")) {
@@ -19,6 +23,11 @@ static void customMessageHandler(QtMsgType type, const QMessageLogContext& conte
 }
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    // Вимикаємо діалогові вікна "Debug Error!" від CRT assert'ів
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
+#endif
     qInstallMessageHandler(customMessageHandler);
     qputenv("QT_ENABLE_HIGHDPI_SCALING", "1");
     QApplication application(argc, argv);

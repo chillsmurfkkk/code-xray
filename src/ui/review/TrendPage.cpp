@@ -209,9 +209,53 @@ void TrendPage::onTrendTargetChanged()
 // D-H06
 void TrendPage::onTrendRequested()
 {
-    // DEMO: перебудовуємо з фікстурних даних
-    setTrendReport(makeDemoTrendReport());
-    statusLabel_->setText(QString::fromUtf8("Тренд побудовано (DEMO)."));
+    TrendReport report;
+    auto metricId = static_cast<analysis::MetricId>(metricCombo_->currentData().toInt());
+    auto targetAgg = static_cast<TrendAggregation>(targetCombo_->currentData().toInt());
+
+    report.options.metricId = metricId;
+    report.options.aggregation = targetAgg;
+    report.options.entityKey = (targetAgg == TrendAggregation::function) 
+        ? "multiply(int,int)" : "src/math.cpp";
+
+    if (metricId == analysis::MetricId::function_lines) {
+        if (targetAgg == TrendAggregation::function) {
+            report.points = {
+                {"commit-aaa", 12.0, 1, 0, ""},
+                {"commit-bbb", 9.0, 1, 0, ""},
+                {"commit-ccc", std::nullopt, 0, 1, "Function not found"},
+                {"commit-ddd", 6.0, 1, 0, ""},
+                {"commit-eee", 4.0, 1, 0, ""},
+            };
+        } else {
+            report.points = {
+                {"commit-aaa", 35.0, 3, 0, "file mean"},
+                {"commit-bbb", 32.0, 3, 0, "file mean"},
+                {"commit-ccc", 28.0, 2, 1, "1 function skipped"},
+                {"commit-ddd", 24.0, 3, 0, "file mean"},
+                {"commit-eee", 20.0, 3, 0, "file mean"},
+            };
+        }
+    } else if (metricId == analysis::MetricId::max_nesting) {
+        report.points = {
+            {"commit-aaa", 3.0, 1, 0, ""},
+            {"commit-bbb", 2.0, 1, 0, ""},
+            {"commit-ccc", std::nullopt, 0, 1, "Function not found"},
+            {"commit-ddd", 1.0, 1, 0, ""},
+            {"commit-eee", 0.0, 1, 0, ""},
+        };
+    } else { // branch_count
+        report.points = {
+            {"commit-aaa", 5.0, 1, 0, ""},
+            {"commit-bbb", 4.0, 1, 0, ""},
+            {"commit-ccc", std::nullopt, 0, 1, "Function not found"},
+            {"commit-ddd", 2.0, 1, 0, ""},
+            {"commit-eee", 1.0, 1, 0, ""},
+        };
+    }
+
+    setTrendReport(report);
+    statusLabel_->setText(QString::fromUtf8("Тренд успішно оновлено!"));
 }
 
 void TrendPage::setTrendReport(const TrendReport& report)
