@@ -154,6 +154,10 @@ if(CODE_XRAY_BUILD_APP)
         src/app/main.cpp
         src/app/main_window.cpp
         src/app/main_window.hpp
+        src/ui/shared/theme.cpp
+        src/ui/shared/theme.hpp
+        src/ui/code/structure_page.cpp
+        src/ui/code/structure_page.hpp
     )
     target_link_libraries(code-xray PRIVATE Qt6::Widgets xray_history xray_review)
 
