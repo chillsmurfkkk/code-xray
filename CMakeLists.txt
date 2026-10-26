@@ -149,17 +149,22 @@ if(CODE_XRAY_BUILD_APP)
         unofficial::tree-sitter::tree-sitter
     )
 
-    # Build the Qt application
-    qt_add_executable(code-xray WIN32
-        src/app/main.cpp
-        src/app/main_window.cpp
-        src/app/main_window.hpp
+    # Shared GUI components can be reused by the app and its behavior checks.
+    add_library(xray_ui STATIC
         src/ui/shared/theme.cpp
         src/ui/shared/theme.hpp
+        src/ui/shared/icons.cpp
+        src/ui/shared/icons.hpp
+        src/ui/shared/navigation.cpp
+        src/ui/shared/navigation.hpp
         src/ui/code/structure_page.cpp
         src/ui/code/structure_page.hpp
     )
-    target_link_libraries(code-xray PRIVATE Qt6::Widgets xray_history xray_review)
+    set_target_properties(xray_ui PROPERTIES AUTOMOC ON)
+    target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common)
+
+    qt_add_executable(code-xray WIN32 src/app/main.cpp src/app/main_window.cpp src/app/main_window.hpp)
+    target_link_libraries(code-xray PRIVATE xray_ui xray_history xray_review)
 
     if(WIN32)
         add_custom_command(TARGET code-xray POST_BUILD
@@ -168,6 +173,12 @@ if(CODE_XRAY_BUILD_APP)
     endif()
 
     if(BUILD_TESTING)
+        add_executable(gui_design_tests tests/ui/design_tests.cpp src/app/main_window.cpp)
+        target_link_libraries(gui_design_tests PRIVATE xray_ui)
+        add_dependencies(gui_design_tests code-xray)
+        add_test(NAME gui_design COMMAND gui_design_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-design")
+        set_tests_properties(gui_design PROPERTIES TIMEOUT 30)
+
         add_executable(parser_tests tests/code/parser_tests.cpp)
         target_link_libraries(parser_tests PRIVATE xray_code)
         add_test(NAME parser COMMAND parser_tests)
