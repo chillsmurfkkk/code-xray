@@ -3,6 +3,8 @@
 #include "ui/shared/navigation.hpp"
 #include "ui/shared/theme.hpp"
 
+#include "ui/code/demo_snapshot.hpp"
+
 #include <QApplication>
 #include <QHBoxLayout>
 #include <QScreen>
@@ -24,6 +26,9 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     auto* navigation = new ui::NavigationPanel(central);
     navigation->setTheme(theme_);
     auto* structure = new ui::StructurePage(central);
+    if (qApp->arguments().contains("--demo")) {
+        structure->setSnapshot(ui::makeDemoSnapshot(), true);
+    }
     layout->addWidget(navigation);
     layout->addWidget(structure, 1);
     setCentralWidget(central);

@@ -85,6 +85,11 @@ void applyTheme(QApplication& application, Theme theme) {
         QListWidget#pageNavigation::item:selected { background: %3; color: %5; }
         QListWidget#pageNavigation::item:disabled { color: %11; }
         QLabel#sectionTitle, QLabel#panelTitle, QLabel#emptyTitle { color: %5; font-weight: 600; }
+        QLineEdit#sourcePath {
+            background: transparent; color: %5; border: 1px solid transparent;
+            border-radius: 6px; padding: 4px; font-weight: 600;
+        }
+        QLineEdit#sourcePath:focus { border-color: %7; }
         QLabel#sectionCaption, QLabel#sourceContext,
         QLabel#emptyDescription, QLabel#panelCaption { color: %6; }
         QLabel#statusPill, QLabel#countPill {
@@ -97,8 +102,8 @@ void applyTheme(QApplication& application, Theme theme) {
             selection-background-color: %3; selection-color: %5;
         }
         QTreeWidget#structureTree:focus, QPlainTextEdit#sourceCode:focus { border-color: %7; }
-        QTreeWidget#structureTree::item { min-height: 20px; padding: 4px 8px; border-radius: 6px; }
-        QTreeWidget#structureTree::item:selected { background: %3; color: %5; }
+        QTreeWidget#structureTree { show-decoration-selected: 0; outline: 0; }
+        QTreeWidget#structureTree::item { min-height: 20px; padding: 4px 8px; border: none; background: transparent; }
         QSplitter#structureSplit::handle { background: transparent; }
         QToolTip {
             background: %2; color: %5; border: 1px solid %4;
