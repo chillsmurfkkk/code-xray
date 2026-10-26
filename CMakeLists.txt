@@ -159,6 +159,8 @@ if(CODE_XRAY_BUILD_APP)
         src/ui/shared/navigation.hpp
         src/ui/code/structure_page.cpp
         src/ui/code/structure_page.hpp
+        src/ui/code/demo_snapshot.cpp
+        src/ui/code/demo_snapshot.hpp
     )
     set_target_properties(xray_ui PROPERTIES AUTOMOC ON)
     target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common)
@@ -179,6 +181,12 @@ if(CODE_XRAY_BUILD_APP)
         add_test(NAME gui_design COMMAND gui_design_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-design")
         set_tests_properties(gui_design PROPERTIES TIMEOUT 30)
 
+        add_executable(gui_snapshot_tests tests/ui/snapshot_tests.cpp)
+        target_link_libraries(gui_snapshot_tests PRIVATE xray_ui xray_code)
+        add_dependencies(gui_snapshot_tests code-xray)
+        add_test(NAME gui_snapshot COMMAND gui_snapshot_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-snapshots")
+        set_tests_properties(gui_snapshot PROPERTIES TIMEOUT 30)
+
         add_executable(parser_tests tests/code/parser_tests.cpp)
         target_link_libraries(parser_tests PRIVATE xray_code)
         add_test(NAME parser COMMAND parser_tests)
@@ -189,6 +197,7 @@ if(CODE_XRAY_BUILD_APP)
             nlohmann_json::nlohmann_json pantor::inja)
         add_test(NAME dependencies COMMAND dependency_smoke)
         add_test(NAME gui_startup COMMAND code-xray --smoke-test)
-        set_tests_properties(gui_startup PROPERTIES TIMEOUT 15)
+        add_test(NAME gui_demo_startup COMMAND code-xray --demo --smoke-test)
+        set_tests_properties(gui_startup gui_demo_startup PROPERTIES TIMEOUT 15)
     endif()
 endif()
