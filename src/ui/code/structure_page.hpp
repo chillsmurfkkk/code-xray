@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <memory>
 #include <vector>
+#include <optional>
 
 class QLabel;
 class QLineEdit;
@@ -14,6 +15,7 @@ class QPlainTextEdit;
 class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QPushButton;
 
 namespace xray::ui {
 
@@ -29,8 +31,11 @@ public:
         bool demonstration = false
     );
 
+    void setLoading(bool loading);
+
     signals:
         void openDirectoryRequested();
+        void cancelRequested();
 
 protected:
     void changeEvent(QEvent* event) override;
@@ -43,6 +48,7 @@ private:
     );
 
     std::shared_ptr<const xray::code::ParsedSnapshot> snapshot_;
+    std::optional<std::size_t> displayedUnit_;
 
     QLabel* context_ = nullptr;
     QLabel* count_ = nullptr;
@@ -53,6 +59,8 @@ private:
     QStackedWidget* codeContent_ = nullptr;
     QWidget* emptyResult_ = nullptr;
     QWidget* unavailableSource_ = nullptr;
+    QPushButton* openButton_ = nullptr;
+    QPushButton* cancelButton_ = nullptr;
 
     // Original LF-delimited source lines mapped to decoded document positions.
     // Qt also treats paragraph separators as blocks, so block numbers alone
@@ -66,6 +74,7 @@ private:
     };
 
     void onEntitySelected(QTreeWidgetItem* item);
+    void showEntityRange(QTreeWidgetItem* item);
     void updateRangeHighlight();
 };
 

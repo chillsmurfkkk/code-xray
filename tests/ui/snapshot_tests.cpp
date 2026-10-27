@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QTextBlock>
@@ -110,7 +111,10 @@ int main(int argc, char* argv[]) {
         auto* sourcePath = page.findChild<QLineEdit*>("sourcePath");
         auto* context = page.findChild<QLabel*>("sourceContext");
         auto* content = page.findChild<QStackedWidget*>("sourceContent");
-        require(tree && editor && sourcePath && context && content, "Missing snapshot widgets");
+        auto* openButton = page.findChild<QPushButton*>("openSourceButton");
+        auto* cancelButton = page.findChild<QPushButton*>("cancelSourceButton");
+        require(tree && editor && sourcePath && context && content && openButton && cancelButton,
+                "Missing snapshot widgets");
 
         page.setSnapshot(parsed);
         app.processEvents();
@@ -131,8 +135,13 @@ int main(int argc, char* argv[]) {
         require(editor->extraSelections().isEmpty(), "Selecting a file must not invent a range");
         const auto baselineGutter = tree->viewport()->grab().toImage();
 
+        int contentChanges = 0;
+        QObject::connect(editor->document(), &QTextDocument::contentsChanged, &page,
+                         [&] { ++contentChanges; });
+
         tree->setCurrentItem(first);
         app.processEvents();
+        require(contentChanges == 0, "Changing entity within a file must reuse the displayed document");
         const int firstPosition = static_cast<int>(expected.indexOf("int first"));
         require(editor->textCursor().position() == firstPosition,
                 "UTF-8, CRLF, BOM and Unicode separators must not shift navigation");
@@ -143,6 +152,20 @@ int main(int argc, char* argv[]) {
         require(firstHighlight.front().cursor.selectionEnd() == expected.indexOf("}\n", firstPosition) + 1,
                 "Function range must include its final source line");
         require(!editor->textCursor().hasSelection(), "Range highlighting must not select user text");
+
+        int cancellationRequests = 0;
+        QObject::connect(&page, &StructurePage::cancelRequested, &page, [&] { ++cancellationRequests; });
+        require(openButton->isEnabled() && cancelButton->isHidden(), "Initial loading controls are incorrect");
+        page.setLoading(true);
+        require(!openButton->isEnabled() && !cancelButton->isHidden() && cancelButton->isEnabled(),
+                "Loading must expose an enabled cancel button and block a second open");
+        cancelButton->click();
+        require(cancellationRequests == 1 && !cancelButton->isEnabled(),
+                "Cancelling must emit one request and prevent repeated requests");
+        require(tree->currentItem() == first && editor->toPlainText() == expected,
+                "Loading and cancellation must preserve the previous snapshot");
+        page.setLoading(false);
+        require(openButton->isEnabled() && cancelButton->isHidden(), "Finishing must restore the open action");
 
         const auto selectedGutter = tree->viewport()->grab().toImage();
         const QRect itemRect = tree->visualItemRect(first);
@@ -169,6 +192,7 @@ int main(int argc, char* argv[]) {
 
         tree->setCurrentItem(second);
         app.processEvents();
+        require(contentChanges == 0, "Selecting another entity must not reload the same file");
         require(editor->textCursor().position() == expected.indexOf("int second"), "Navigation to another function failed");
         const auto blockRect = editor->cursorRect();
         require(blockRect.bottom() >= 0 && blockRect.top() < editor->viewport()->height(),
@@ -176,6 +200,7 @@ int main(int argc, char* argv[]) {
         auto* otherFile = findFile(*tree, "src/other.cpp");
         tree->setCurrentItem(findFunction(otherFile, "first"));
         app.processEvents();
+        require(contentChanges > 0, "Selecting a different file must load its document");
         require(editor->toPlainText() == "int first() { return 9; }\n", "Same-name functions must use the correct file");
         tree->setCurrentItem(otherFile);
         require(editor->extraSelections().isEmpty(), "Selecting a file must clear the old function highlight");
