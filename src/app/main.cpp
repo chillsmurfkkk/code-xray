@@ -1,4 +1,5 @@
 #include "main_window.hpp"
+#include "windows_uia_filter.hpp"
 
 #include "ui/shared/theme.hpp"
 
@@ -7,6 +8,14 @@
 
 int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
+
+#ifdef Q_OS_WIN
+    // The filter must outlive the window and QApplication's event loop.
+    xray::app::WindowsUiaFilter uiaFilter;
+    if (application.arguments().contains("--no-uia")) {
+        application.installNativeEventFilter(&uiaFilter);
+    }
+#endif
 
     application.setOrganizationName("CodeXRay");
     application.setApplicationName("CodeXRay");

@@ -143,7 +143,10 @@ endif()
 if(CODE_XRAY_BUILD_APP)
     include(cmake/Dependencies.cmake)
 
-    target_sources(xray_code PRIVATE src/code/parse.cpp)
+    target_sources(xray_code PRIVATE
+        src/code/parse.cpp
+        src/code/load.cpp
+    )
     target_link_libraries(xray_code PRIVATE
         xray_cpp_grammar
         unofficial::tree-sitter::tree-sitter
@@ -165,7 +168,7 @@ if(CODE_XRAY_BUILD_APP)
     set_target_properties(xray_ui PROPERTIES AUTOMOC ON)
     target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common)
 
-    qt_add_executable(code-xray WIN32 src/app/main.cpp src/app/main_window.cpp src/app/main_window.hpp)
+    qt_add_executable(code-xray WIN32 src/app/main.cpp src/app/main_window.cpp src/app/main_window.hpp src/app/windows_uia_filter.hpp)
     target_link_libraries(code-xray PRIVATE xray_ui xray_history xray_review)
 
     if(WIN32)
@@ -176,7 +179,7 @@ if(CODE_XRAY_BUILD_APP)
 
     if(BUILD_TESTING)
         add_executable(gui_design_tests tests/ui/design_tests.cpp src/app/main_window.cpp)
-        target_link_libraries(gui_design_tests PRIVATE xray_ui)
+        target_link_libraries(gui_design_tests PRIVATE xray_ui xray_code)
         add_dependencies(gui_design_tests code-xray)
         add_test(NAME gui_design COMMAND gui_design_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-design")
         set_tests_properties(gui_design PROPERTIES TIMEOUT 30)
@@ -191,6 +194,10 @@ if(CODE_XRAY_BUILD_APP)
         target_link_libraries(parser_tests PRIVATE xray_code)
         add_test(NAME parser COMMAND parser_tests)
 
+        add_executable(load_tests tests/code/load_tests.cpp)
+        target_link_libraries(load_tests PRIVATE xray_code)
+        add_test(NAME source_load COMMAND load_tests)
+
         add_executable(dependency_smoke tests/dependencies.cpp)
         target_link_libraries(dependency_smoke PRIVATE xray_common xray_cpp_grammar
             unofficial::tree-sitter::tree-sitter libgit2::libgit2package
@@ -199,5 +206,15 @@ if(CODE_XRAY_BUILD_APP)
         add_test(NAME gui_startup COMMAND code-xray --smoke-test)
         add_test(NAME gui_demo_startup COMMAND code-xray --demo --smoke-test)
         set_tests_properties(gui_startup gui_demo_startup PROPERTIES TIMEOUT 15)
+
+        if(WIN32)
+            add_executable(windows_uia_filter_tests tests/ui/windows_uia_filter_tests.cpp)
+            target_link_libraries(windows_uia_filter_tests PRIVATE xray_common Qt6::Core)
+            add_dependencies(windows_uia_filter_tests code-xray)
+            add_test(NAME windows_uia_filter COMMAND windows_uia_filter_tests)
+            add_test(NAME gui_startup_no_uia COMMAND code-xray --no-uia --smoke-test)
+            set_tests_properties(windows_uia_filter PROPERTIES TIMEOUT 30)
+            set_tests_properties(gui_startup_no_uia PROPERTIES TIMEOUT 15)
+        endif()
     endif()
 endif()

@@ -141,16 +141,43 @@ StructurePage::StructurePage(QWidget* parent) : QWidget(parent) {
         QString::fromUtf8("Відкрити папку"),
         this
     );
+    openButton->setObjectName("openSourceButton");
     openButton->setProperty("role", "primaryAction");
     openButton->setIcon(makeIcon(Symbol::source));
     openButton->setIconSize(QSize(18, 18));
     openButton->setMinimumHeight(36);
     openButton->setCursor(Qt::PointingHandCursor);
 
+    openButton_ = openButton;
+
+    cancelButton_ = new QPushButton(
+        QString::fromUtf8("Скасувати"),
+        this
+    );
+    cancelButton_->setObjectName("cancelSourceButton");
+    cancelButton_->setProperty("role", "primaryAction");
+    cancelButton_->setMinimumHeight(36);
+    cancelButton_->setCursor(Qt::PointingHandCursor);
+    cancelButton_->hide();
+
+    connect(
+        cancelButton_,
+        &QPushButton::clicked,
+        this,
+        [this]() {
+            cancelButton_->setEnabled(false);
+            cancelButton_->setText(
+                QString::fromUtf8("Скасовуємо…")
+            );
+            emit cancelRequested();
+        }
+    );
+
     auto* headerRow = new QHBoxLayout;
     headerRow->setSpacing(16);
     headerRow->addLayout(heading, 1);
     headerRow->addWidget(openButton, 0, Qt::AlignVCenter);
+    headerRow->addWidget(cancelButton_, 0, Qt::AlignVCenter);
 
     layout->addLayout(headerRow);
 
@@ -190,6 +217,8 @@ StructurePage::StructurePage(QWidget* parent) : QWidget(parent) {
     tree_->setObjectName("structureTree");
     tree_->setHeaderHidden(true);
     tree_->setColumnCount(1);
+    tree_->setUniformRowHeights(true);
+    tree_->setWordWrap(false);
     tree_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     tree_->setAccessibleName(QString::fromUtf8("Структура коду"));
     tree_->setEnabled(false);
@@ -324,6 +353,8 @@ void StructurePage::setSnapshot(
 ) {
     const QSignalBlocker blocker(tree_);
 
+    displayedUnit_.reset();
+
     tree_->clear();
     codeView_->clear();
     codeView_->setExtraSelections({});
@@ -394,6 +425,19 @@ void StructurePage::setSnapshot(
 }
 
 void StructurePage::onEntitySelected(QTreeWidgetItem* item) {
+    if (item && snapshot_ && displayedUnit_) {
+        bool validIndex = false;
+        const auto unitIndex = item->data(0, UnitIndexRole)
+            .toULongLong(&validIndex);
+
+        if (validIndex && unitIndex == *displayedUnit_) {
+            showEntityRange(item);
+            return;
+        }
+    }
+
+    displayedUnit_.reset();
+
     codeView_->clear();
     codeView_->setExtraSelections({});
     codeView_->setToolTip({});
@@ -448,19 +492,28 @@ void StructurePage::onEntitySelected(QTreeWidgetItem* item) {
     sourcePath_->setCursorPosition(0);
 
     codeContent_->setCurrentWidget(codeView_);
+    displayedUnit_ = static_cast<std::size_t>(unitIndex);
+    showEntityRange(item);
+}
+
+void StructurePage::showEntityRange(QTreeWidgetItem* item) {
     updateRangeHighlight();
 
     const auto startLine = item->data(0, StartLineRole)
         .toULongLong();
 
-    auto* document = codeView_->document();
-
-    if (startLine == 0 || startLine > sourceLineStarts_.size()) {
+    if (startLine > sourceLineStarts_.size()) {
         return;
     }
 
-    QTextCursor cursor(document);
-    cursor.setPosition(sourceLineStarts_[static_cast<std::size_t>(startLine - 1)]);
+    const int position = startLine == 0
+        ? 0
+        : sourceLineStarts_[
+            static_cast<std::size_t>(startLine - 1)
+        ];
+
+    QTextCursor cursor(codeView_->document());
+    cursor.setPosition(position);
     codeView_->setTextCursor(cursor);
     codeView_->ensureCursorVisible();
 }
@@ -500,6 +553,16 @@ void StructurePage::changeEvent(QEvent* event) {
     QWidget::changeEvent(event);
     if (event->type() == QEvent::PaletteChange || event->type() == QEvent::StyleChange)
         updateRangeHighlight();
+}
+
+void StructurePage::setLoading(bool loading) {
+    openButton_->setEnabled(!loading);
+
+    cancelButton_->setVisible(loading);
+    cancelButton_->setEnabled(loading);
+    cancelButton_->setText(
+        QString::fromUtf8("Скасувати")
+    );
 }
 
 } // namespace xray::ui
