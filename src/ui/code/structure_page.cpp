@@ -25,6 +25,7 @@
 #include <QTextEdit>
 #include <QTextFormat>
 #include <QVariant>
+#include <QPushButton>
 
 #include <algorithm>
 #include <limits>
@@ -136,7 +137,29 @@ StructurePage::StructurePage(QWidget* parent) : QWidget(parent) {
     heading->setSpacing(4);
     heading->addWidget(title);
     heading->addWidget(context_);
-    layout->addLayout(heading);
+    auto* openButton = new QPushButton(
+        QString::fromUtf8("Відкрити папку"),
+        this
+    );
+    openButton->setProperty("role", "primaryAction");
+    openButton->setIcon(makeIcon(Symbol::source));
+    openButton->setIconSize(QSize(18, 18));
+    openButton->setMinimumHeight(36);
+    openButton->setCursor(Qt::PointingHandCursor);
+
+    auto* headerRow = new QHBoxLayout;
+    headerRow->setSpacing(16);
+    headerRow->addLayout(heading, 1);
+    headerRow->addWidget(openButton, 0, Qt::AlignVCenter);
+
+    layout->addLayout(headerRow);
+
+    connect(
+        openButton,
+        &QPushButton::clicked,
+        this,
+        &StructurePage::openDirectoryRequested
+    );
 
     auto* splitter = new WorkspaceSplitter(this);
     splitter->setObjectName("structureSplit");

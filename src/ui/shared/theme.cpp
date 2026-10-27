@@ -85,6 +85,16 @@ void applyTheme(QApplication& application, Theme theme) {
         QListWidget#pageNavigation::item:selected { background: %3; color: %5; }
         QListWidget#pageNavigation::item:disabled { color: %11; }
         QLabel#sectionTitle, QLabel#panelTitle, QLabel#emptyTitle { color: %5; font-weight: 600; }
+
+        QPushButton[role="primaryAction"] {
+            background: %10; color: %5; border: 2px solid %4;
+            border-radius: 10px; padding: 6px 14px; font-weight: 600;
+        }
+        QPushButton[role="primaryAction"]:hover:enabled { background: %9; border-color: %7; }
+        QPushButton[role="primaryAction"]:pressed:enabled { background: %3; border-color: %7; }
+        QPushButton[role="primaryAction"]:focus { border-color: %7; }
+        QPushButton[role="primaryAction"]:disabled { background: %2; color: %11; border-color: %4; }
+
         QLineEdit#sourcePath {
             background: transparent; color: %5; border: 1px solid transparent;
             border-radius: 6px; padding: 4px; font-weight: 600;

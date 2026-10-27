@@ -8,6 +8,8 @@
 #include <QApplication>
 #include <QHBoxLayout>
 #include <QScreen>
+#include <QFileDialog>
+#include <QMessageBox>
 
 namespace xray::app {
 
@@ -32,6 +34,28 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     layout->addWidget(navigation);
     layout->addWidget(structure, 1);
     setCentralWidget(central);
+
+    connect(
+        structure,
+        &ui::StructurePage::openDirectoryRequested,
+        this,
+        [this]() {
+            const QString directory = QFileDialog::getExistingDirectory(
+                this,
+                QString::fromUtf8("Виберіть папку з кодом")
+            );
+
+            if (directory.isEmpty()) {
+                return;
+            }
+
+            QMessageBox::information(
+                this,
+                QString::fromUtf8("Папку вибрано"),
+                directory
+            );
+        }
+    );
 
     connect(navigation, &ui::NavigationPanel::themeToggleRequested, this, [this, navigation]() {
         theme_ = theme_ == ui::Theme::dark ? ui::Theme::light : ui::Theme::dark;

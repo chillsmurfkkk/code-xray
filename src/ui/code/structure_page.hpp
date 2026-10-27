@@ -18,6 +18,8 @@ class QTreeWidgetItem;
 namespace xray::ui {
 
 class StructurePage : public QWidget {
+    Q_OBJECT
+
 public:
     explicit StructurePage(QWidget* parent = nullptr);
 
@@ -26,6 +28,9 @@ public:
         std::shared_ptr<const xray::code::ParsedSnapshot> snapshot,
         bool demonstration = false
     );
+
+    signals:
+        void openDirectoryRequested();
 
 protected:
     void changeEvent(QEvent* event) override;
