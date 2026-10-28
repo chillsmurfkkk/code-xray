@@ -111,7 +111,7 @@ void TrendChartWidget::paintEvent(QPaintEvent* /*event*/)
     painter.drawLine(padLeft, padTop + plotH, w - padRight, padTop + plotH);
 
     // Лінії — яскравий зелений акцент теми (Gruvbox green / aqua)
-    QPen linePen(greenAccent, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    QPen linePen(greenAccent, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     const QColor redColor(dark ? "#fb4934" : "#9d0006");
     QPen gapPen(redColor, 2, Qt::SolidLine, Qt::RoundCap);
 
@@ -186,12 +186,24 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
     mainLayout->setContentsMargins(16, 16, 16, 16);
     mainLayout->setSpacing(12);
 
+    // --- Заголовок та індикатор демо ---
+    auto* headerLayout = new QHBoxLayout;
     auto* titleLabel = new QLabel(QString::fromUtf8("Динаміка"));
     auto titleFont = titleLabel->font();
     titleFont.setPointSizeF(titleFont.pointSizeF() + 4);
     titleFont.setWeight(QFont::Bold);
     titleLabel->setFont(titleFont);
-    mainLayout->addWidget(titleLabel);
+    headerLayout->addWidget(titleLabel);
+
+    auto* demoBadge = new QLabel(QString::fromUtf8("Демо-режим"));
+    demoBadge->setStyleSheet(
+        "background: #d65d0e; color: #ebdbb2; font-weight: bold; "
+        "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
+    );
+    demoBadge->setToolTip(QString::fromUtf8("Відображається динаміка на основі демонстраційних фікстурних комітів."));
+    headerLayout->addWidget(demoBadge);
+    headerLayout->addStretch();
+    mainLayout->addLayout(headerLayout);
 
     // --- Панель керування ---
     auto* controlLayout = new QHBoxLayout;
@@ -251,18 +263,19 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
 
     // Демо-дані
     setTrendReport(makeDemoTrendReport());
+    statusLabel_->setText(QString::fromUtf8("[Демо] Динаміку побудовано на основі 5 тестових комітів."));
 }
 
 // D-H04
 void TrendPage::onTrendMetricChanged()
 {
-    statusLabel_->setText(QString::fromUtf8("Метрику змінено — натисніть «Побудувати»."));
+    statusLabel_->setText(QString::fromUtf8("[Демо] Метрику змінено — натисніть «Побудувати»."));
 }
 
 // D-H05
 void TrendPage::onTrendTargetChanged()
 {
-    statusLabel_->setText(QString::fromUtf8("Ціль змінено — натисніть «Побудувати»."));
+    statusLabel_->setText(QString::fromUtf8("[Демо] Ціль змінено — натисніть «Побудувати»."));
 }
 
 // D-H06
@@ -323,7 +336,7 @@ void TrendPage::setTrendReport(const TrendReport& report)
     chart_->setPoints(report.points);
     populateTable(report.points);
     statusLabel_->setText(
-        QString::fromUtf8("Точок: %1, ціль: %2")
+        QString::fromUtf8("[Демо] Точок: %1, ціль: %2")
             .arg(static_cast<qlonglong>(report.points.size()))
             .arg(QString::fromStdString(report.options.entityKey)));
 }

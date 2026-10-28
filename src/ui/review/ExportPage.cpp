@@ -15,12 +15,24 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent)
     mainLayout->setContentsMargins(16, 16, 16, 16);
     mainLayout->setSpacing(12);
 
+    // --- Заголовок та індикатор демо ---
+    auto* headerLayout = new QHBoxLayout;
     auto* titleLabel = new QLabel(QString::fromUtf8("Експорт звіту"));
     auto titleFont = titleLabel->font();
     titleFont.setPointSizeF(titleFont.pointSizeF() + 4);
     titleFont.setWeight(QFont::Bold);
     titleLabel->setFont(titleFont);
-    mainLayout->addWidget(titleLabel);
+    headerLayout->addWidget(titleLabel);
+
+    auto* demoBadge = new QLabel(QString::fromUtf8("Демо-режим"));
+    demoBadge->setStyleSheet(
+        "background: #d65d0e; color: #ebdbb2; font-weight: bold; "
+        "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
+    );
+    demoBadge->setToolTip(QString::fromUtf8("Експортуються демонстраційні дані звіту."));
+    headerLayout->addWidget(demoBadge);
+    headerLayout->addStretch();
+    mainLayout->addLayout(headerLayout);
 
     // --- Параметри ---
     auto* paramsLayout = new QHBoxLayout;

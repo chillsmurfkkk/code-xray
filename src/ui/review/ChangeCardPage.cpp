@@ -121,20 +121,48 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
 {
     currentItem_ = item;
 
-    titleLabel_->setText(QString::fromUtf8("Картка зміни: ") + QString::fromStdString(item.entityKey));
+    const bool isDemo = (report.analysisFingerprint == "fp-demo-v1" || report.baseId == "analysis-base-001");
+    if (isDemo) {
+        titleLabel_->setText(QString::fromUtf8("[Демо] Картка зміни: ") + QString::fromStdString(item.entityKey));
+    } else {
+        titleLabel_->setText(QString::fromUtf8("Картка зміни: ") + QString::fromStdString(item.entityKey));
+    }
     explanationLabel_->setText(QString::fromStdString(item.explanation));
 
-    // --- Код до/після ---
-    auto extractCode = [&](const std::string& sourceId, const code::SourceRange& range) -> QString {
+    // Обов'язково очищаємо обидві панелі коду перед встановленням нового
+    beforeCodeView_->setSourceText("");
+    afterCodeView_->setSourceText("");
+
+    // --- Код до/після з урахуванням шляху файла ---
+    auto extractCode = [&](const std::string& sourceId, const std::string& relativePath, const code::SourceRange& range) -> QString {
         for (const auto& snap : {report.base, report.target}) {
             if (!snap || !snap->parsed || !snap->parsed->source) continue;
             if (snap->parsed->source->id != sourceId) continue;
             for (const auto& file : snap->parsed->source->files) {
+                // Шлях обов'язково має збігатися з відносним шляхом посилання
+                bool matches = false;
+                if (relativePath.empty()) {
+                    matches = true;
+                } else if (file.relativePath == relativePath) {
+                    matches = true;
+                } else {
+                    auto f1 = std::filesystem::path(file.relativePath).generic_string();
+                    auto f2 = std::filesystem::path(relativePath).generic_string();
+                    if (f1 == f2 || f1.ends_with("/" + f2) || f2.ends_with("/" + f1)) {
+                        matches = true;
+                    }
+                }
+                if (!matches) continue;
+
                 if (file.bytes) {
+                    const auto totalSize = file.bytes->size();
                     auto startByte = static_cast<std::string::size_type>(range.startByte);
                     auto endByte = static_cast<std::string::size_type>(range.endByte);
-                    if (endByte <= file.bytes->size()) {
+                    if (startByte < totalSize && endByte <= totalSize && startByte < endByte) {
                         return QString::fromStdString(file.bytes->substr(startByte, endByte - startByte));
+                    }
+                    if (startByte < totalSize) {
+                        return QString::fromStdString(file.bytes->substr(startByte));
                     }
                     return QString::fromStdString(*file.bytes);
                 }
@@ -143,29 +171,62 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
         return QString::fromUtf8("(код недоступний)");
     };
 
+    auto isTargetSource = [&](const std::string& sourceId) -> bool {
+        return report.target && report.target->parsed && report.target->parsed->source &&
+               report.target->parsed->source->id == sourceId;
+    };
+
     if (item.kind == ReviewKind::added) {
         beforeCodeView_->setSourceText(QString::fromUtf8("// (функції ще не існувало у версії «до»)\n"));
         if (!item.sourceRefs.empty()) {
             const auto& ref = item.sourceRefs.front();
-            afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.range));
+            afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
             currentPath_ = QString::fromStdString(ref.relativePath);
         }
     } else if (item.kind == ReviewKind::removed) {
         if (!item.sourceRefs.empty()) {
             const auto& ref = item.sourceRefs.front();
-            beforeCodeView_->setSourceText(extractCode(ref.sourceId, ref.range));
+            beforeCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
             currentPath_ = QString::fromStdString(ref.relativePath);
         }
         afterCodeView_->setSourceText(QString::fromUtf8("// (функцію видалено у версії «після»)\n"));
-    } else {
+    } else if (item.kind == ReviewKind::unmatched) {
+        // [P2] unmatched: якщо посилання на target, то показуємо в «після», а зліва — заглушку
         if (!item.sourceRefs.empty()) {
             const auto& ref = item.sourceRefs.front();
-            beforeCodeView_->setSourceText(extractCode(ref.sourceId, ref.range));
             currentPath_ = QString::fromStdString(ref.relativePath);
+            if (isTargetSource(ref.sourceId)) {
+                beforeCodeView_->setSourceText(QString::fromUtf8("// (незіставлено: сутність присутня лише у версії «після»)\n"));
+                afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
+            } else {
+                beforeCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
+                afterCodeView_->setSourceText(QString::fromUtf8("// (незіставлено: сутність присутня лише у версії «до»)\n"));
+            }
+        } else {
+            beforeCodeView_->setSourceText(QString::fromUtf8("// (незіставлено: код «до» відсутній)\n"));
+            afterCodeView_->setSourceText(QString::fromUtf8("// (незіставлено: код «після» відсутній)\n"));
         }
-        if (item.sourceRefs.size() > 1) {
-            const auto& ref = item.sourceRefs[1];
-            afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.range));
+    } else {
+        // changed / unchanged
+        if (item.sourceRefs.size() >= 2) {
+            const auto* baseRef = &item.sourceRefs[0];
+            const auto* targetRef = &item.sourceRefs[1];
+            if (isTargetSource(baseRef->sourceId) && !isTargetSource(targetRef->sourceId)) {
+                std::swap(baseRef, targetRef);
+            }
+            beforeCodeView_->setSourceText(extractCode(baseRef->sourceId, baseRef->relativePath, baseRef->range));
+            afterCodeView_->setSourceText(extractCode(targetRef->sourceId, targetRef->relativePath, targetRef->range));
+            currentPath_ = QString::fromStdString(targetRef->relativePath.empty() ? baseRef->relativePath : targetRef->relativePath);
+        } else if (!item.sourceRefs.empty()) {
+            const auto& ref = item.sourceRefs.front();
+            currentPath_ = QString::fromStdString(ref.relativePath);
+            if (isTargetSource(ref.sourceId)) {
+                beforeCodeView_->setSourceText(QString::fromUtf8("// (версія «до» недоступна)\n"));
+                afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
+            } else {
+                beforeCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
+                afterCodeView_->setSourceText(QString::fromUtf8("// (версія «після» недоступна)\n"));
+            }
         }
     }
 
