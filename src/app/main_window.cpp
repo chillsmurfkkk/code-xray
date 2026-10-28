@@ -3,8 +3,13 @@
 #include "ui/shared/navigation.hpp"
 #include "ui/shared/theme.hpp"
 
-#include "code/api.hpp"
+#include "ui/review/ComparisonPage.hpp"
+#include "ui/review/TrendPage.hpp"
+#include "ui/review/ChangeCardPage.hpp"
+#include "ui/review/ExportPage.hpp"
+#include "ui/review/review_fixtures.hpp"
 
+#include "code/api.hpp"
 #include "ui/code/demo_snapshot.hpp"
 
 #include <exception>
@@ -20,6 +25,7 @@
 #include <QMessageBox>
 #include <QStatusBar>
 #include <QThread>
+#include <QStackedWidget>
 
 namespace xray::app {
 
@@ -37,19 +43,62 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
 
     auto* navigation = new ui::NavigationPanel(central);
     navigation->setTheme(theme_);
-    auto* structure = new ui::StructurePage(central);
+
+    contentStack_ = new QStackedWidget(central);
+
+    // Сторінка розділу Код
+    structure_ = new ui::StructurePage(contentStack_);
     if (qApp->arguments().contains("--demo")) {
-        structure->setSnapshot(ui::makeDemoSnapshot(), true);
+        structure_->setSnapshot(ui::makeDemoSnapshot(), true);
     }
+    contentStack_->addWidget(structure_);
+
+    // Сторінки розділу Порівняння (Модуль D)
+    comparisonPage_ = new ui::review::ComparisonPage(contentStack_);
+    trendPage_      = new ui::review::TrendPage(contentStack_);
+    changeCardPage_ = new ui::review::ChangeCardPage(contentStack_);
+    exportPage_     = new ui::review::ExportPage(contentStack_);
+
+    contentStack_->addWidget(comparisonPage_);
+    contentStack_->addWidget(trendPage_);
+    contentStack_->addWidget(changeCardPage_);
+    contentStack_->addWidget(exportPage_);
+
     layout->addWidget(navigation);
-    layout->addWidget(structure, 1);
+    layout->addWidget(contentStack_, 1);
     setCentralWidget(central);
 
+    // Навігація між сторінками
+    connect(navigation, &ui::NavigationPanel::pageSelected, this, [this](ui::Section section, int pageIndex) {
+        if (section == ui::Section::code) {
+            if (pageIndex == 2) { // Структура
+                contentStack_->setCurrentWidget(structure_);
+            }
+        } else if (section == ui::Section::review) {
+            switch (pageIndex) {
+            case 0: contentStack_->setCurrentWidget(comparisonPage_); break;
+            case 1: contentStack_->setCurrentWidget(trendPage_);      break;
+            case 2: contentStack_->setCurrentWidget(changeCardPage_); break;
+            case 3: contentStack_->setCurrentWidget(exportPage_);     break;
+            default: break;
+            }
+        }
+    });
+
+    // Зв'язуємо вибір рядка в таблиці порівняння з відкриттям «Картки зміни»
+    connect(comparisonPage_, &ui::review::ComparisonPage::reviewItemSelected, this, [this](int index) {
+        auto report = ui::review::makeDemoComparisonReport();
+        if (index >= 0 && index < static_cast<int>(report.items.size())) {
+            changeCardPage_->showItem(report.items[static_cast<std::size_t>(index)], report);
+            contentStack_->setCurrentWidget(changeCardPage_);
+        }
+    });
+
     connect(
-        structure,
+        structure_,
         &ui::StructurePage::openDirectoryRequested,
         this,
-        [this, structure]() {
+        [this]() {
             const QString directory = QFileDialog::getExistingDirectory(
                 this,
                 QString::fromUtf8("Виберіть папку з кодом")
@@ -59,12 +108,12 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
                 return;
             }
 
-            loadDirectory(directory, structure);
+            loadDirectory(directory, structure_);
         }
     );
 
     connect(
-        structure,
+        structure_,
         &ui::StructurePage::cancelRequested,
         this,
         [this]() {

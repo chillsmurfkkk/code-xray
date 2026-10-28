@@ -41,14 +41,20 @@ NavigationPanel::NavigationPanel(QWidget* parent) : QFrame(parent) {
         railLayout->addWidget(button);
         return button;
     };
-    auto* code = addSection(Symbol::code, QString::fromUtf8("Код"), true);
-    code->setObjectName("codeSection");
-    code->setCheckable(true);
-    code->setAutoExclusive(true);
-    code->setChecked(true);
+
+    codeButton_ = addSection(Symbol::code, QString::fromUtf8("Код"), true);
+    codeButton_->setObjectName("codeSection");
+    codeButton_->setCheckable(true);
+    codeButton_->setAutoExclusive(true);
+    codeButton_->setChecked(true);
+
     addSection(Symbol::analysis, QString::fromUtf8("Аналіз"), false);
     addSection(Symbol::history, QString::fromUtf8("Історія"), false);
-    addSection(Symbol::compare, QString::fromUtf8("Порівняння"), false);
+
+    compareButton_ = addSection(Symbol::compare, QString::fromUtf8("Порівняння"), true);
+    compareButton_->setObjectName("compareSection");
+    compareButton_->setCheckable(true);
+    compareButton_->setAutoExclusive(true);
 
     railLayout->addStretch();
     pagesToggle_ = new IconButton(Symbol::sidebarClose,
@@ -71,41 +77,81 @@ NavigationPanel::NavigationPanel(QWidget* parent) : QFrame(parent) {
     auto* pagesLayout = new QVBoxLayout(pagesPanel_);
     pagesLayout->setContentsMargins(12, 20, 12, 12);
     pagesLayout->setSpacing(6);
-    auto* title = new QLabel(QString::fromUtf8("Код"), pagesPanel_);
-    title->setObjectName("sectionTitle");
-    auto titleFont = title->font();
+
+    sectionTitle_ = new QLabel(pagesPanel_);
+    sectionTitle_->setObjectName("sectionTitle");
+    auto titleFont = sectionTitle_->font();
     titleFont.setPointSizeF(titleFont.pointSizeF() + 2);
     titleFont.setWeight(QFont::DemiBold);
-    title->setFont(titleFont);
-    auto* subtitle = new QLabel(QString::fromUtf8("Файли та структура"), pagesPanel_);
-    subtitle->setObjectName("sectionCaption");
-    pagesLayout->addWidget(title);
-    pagesLayout->addWidget(subtitle);
+    sectionTitle_->setFont(titleFont);
+
+    sectionSubtitle_ = new QLabel(pagesPanel_);
+    sectionSubtitle_->setObjectName("sectionCaption");
+
+    pagesLayout->addWidget(sectionTitle_);
+    pagesLayout->addWidget(sectionSubtitle_);
     pagesLayout->addSpacing(14);
 
-    auto* pages = new QListWidget(pagesPanel_);
-    pages->setObjectName("pageNavigation");
-    pages->setAccessibleName(QString::fromUtf8("Сторінки розділу Код"));
-    pages->setIconSize(QSize(18, 18));
-    pages->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    const auto addPage = [&](Symbol symbol, const QString& title, bool available) {
-        auto* item = new QListWidgetItem(makeIcon(symbol), title, pages);
+    pagesList_ = new QListWidget(pagesPanel_);
+    pagesList_->setObjectName("pageNavigation");
+    pagesList_->setIconSize(QSize(18, 18));
+    pagesList_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    pagesLayout->addWidget(pagesList_, 1);
+
+    layout->addWidget(rail_);
+    layout->addWidget(divider_);
+    layout->addWidget(pagesPanel_);
+
+    connect(pagesToggle_, &QToolButton::toggled, this, &NavigationPanel::setExpanded);
+    connect(themeButton_, &QToolButton::clicked, this, &NavigationPanel::themeToggleRequested);
+
+    connect(codeButton_, &QToolButton::clicked, this, [this]() {
+        showSection(Section::code);
+    });
+    connect(compareButton_, &QToolButton::clicked, this, [this]() {
+        showSection(Section::review);
+    });
+
+    connect(pagesList_, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row >= 0) {
+            emit pageSelected(currentSection_, row);
+        }
+    });
+
+    showSection(Section::code);
+    setExpanded(true);
+}
+
+void NavigationPanel::showSection(Section section) {
+    currentSection_ = section;
+    pagesList_->clear();
+
+    const auto addPage = [this](Symbol symbol, const QString& title, bool available) {
+        auto* item = new QListWidgetItem(makeIcon(symbol), title, pagesList_);
         item->setToolTip(available ? title
             : title + QString::fromUtf8(" — сторінку ще не підключено"));
         if (!available) item->setFlags(Qt::NoItemFlags);
     };
-    addPage(Symbol::source, QString::fromUtf8("Джерело"), false);
-    addPage(Symbol::filter, QString::fromUtf8("Відбір файлів"), false);
-    addPage(Symbol::structure, QString::fromUtf8("Структура"), true);
-    addPage(Symbol::diagnostics, QString::fromUtf8("Діагностика"), false);
-    pages->setCurrentRow(2);
-    pagesLayout->addWidget(pages, 1);
-    layout->addWidget(rail_);
-    layout->addWidget(divider_);
-    layout->addWidget(pagesPanel_);
-    connect(pagesToggle_, &QToolButton::toggled, this, &NavigationPanel::setExpanded);
-    connect(themeButton_, &QToolButton::clicked, this, &NavigationPanel::themeToggleRequested);
-    setExpanded(true);
+
+    if (section == Section::code) {
+        sectionTitle_->setText(QString::fromUtf8("Код"));
+        sectionSubtitle_->setText(QString::fromUtf8("Файли та структура"));
+        addPage(Symbol::source, QString::fromUtf8("Джерело"), false);
+        addPage(Symbol::filter, QString::fromUtf8("Відбір файлів"), false);
+        addPage(Symbol::structure, QString::fromUtf8("Структура"), true);
+        addPage(Symbol::diagnostics, QString::fromUtf8("Діагностика"), false);
+        pagesList_->setCurrentRow(2);
+    } else if (section == Section::review) {
+        sectionTitle_->setText(QString::fromUtf8("Порівняння"));
+        sectionSubtitle_->setText(QString::fromUtf8("Зміни, тренди та експорт"));
+        addPage(Symbol::compare, QString::fromUtf8("Порівняння"), true);
+        addPage(Symbol::diagnostics, QString::fromUtf8("Динаміка"), true);
+        addPage(Symbol::structure, QString::fromUtf8("Картка зміни"), true);
+        addPage(Symbol::document, QString::fromUtf8("Експорт"), true);
+        pagesList_->setCurrentRow(0);
+    }
+
+    emit sectionChanged(section);
 }
 
 void NavigationPanel::setExpanded(bool expanded) {
@@ -123,4 +169,5 @@ void NavigationPanel::setTheme(Theme theme) {
         ? QString::fromUtf8("Увімкнути світлу тему")
         : QString::fromUtf8("Увімкнути темну тему"));
 }
+
 } // namespace xray::ui

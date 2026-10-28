@@ -169,9 +169,17 @@ if(CODE_XRAY_BUILD_APP)
         src/ui/code/code_view.hpp
         src/ui/code/cpp_syntax_highlighter.cpp
         src/ui/code/cpp_syntax_highlighter.hpp
+        src/ui/review/ComparisonPage.cpp
+        src/ui/review/ComparisonPage.hpp
+        src/ui/review/TrendPage.cpp
+        src/ui/review/TrendPage.hpp
+        src/ui/review/ChangeCardPage.cpp
+        src/ui/review/ChangeCardPage.hpp
+        src/ui/review/ExportPage.cpp
+        src/ui/review/ExportPage.hpp
     )
     set_target_properties(xray_ui PROPERTIES AUTOMOC ON)
-    target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common)
+    target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common xray_review)
 
     qt_add_executable(code-xray WIN32 src/app/main.cpp src/app/main_window.cpp src/app/main_window.hpp src/app/windows_uia_filter.hpp)
     target_link_libraries(code-xray PRIVATE xray_ui xray_history xray_review)
