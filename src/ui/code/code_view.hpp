@@ -11,6 +11,7 @@ class QResizeEvent;
 namespace xray::ui {
 
 class LineNumberArea;
+class CppSyntaxHighlighter;
 
 class CodeView final : public QPlainTextEdit {
     Q_OBJECT
@@ -40,6 +41,7 @@ private:
     void paintLineNumberArea(QPaintEvent* event);
 
     LineNumberArea* lineNumberArea_ = nullptr;
+    CppSyntaxHighlighter* highlighter_ = nullptr;
     std::vector<int> sourceLineStarts_{0};
 };
 

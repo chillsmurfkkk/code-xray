@@ -167,6 +167,8 @@ if(CODE_XRAY_BUILD_APP)
         src/ui/code/demo_snapshot.hpp
         src/ui/code/code_view.cpp
         src/ui/code/code_view.hpp
+        src/ui/code/cpp_syntax_highlighter.cpp
+        src/ui/code/cpp_syntax_highlighter.hpp
     )
     set_target_properties(xray_ui PROPERTIES AUTOMOC ON)
     target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common)
@@ -192,6 +194,12 @@ if(CODE_XRAY_BUILD_APP)
         add_dependencies(gui_snapshot_tests code-xray)
         add_test(NAME gui_snapshot COMMAND gui_snapshot_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-snapshots")
         set_tests_properties(gui_snapshot PROPERTIES TIMEOUT 30)
+
+        add_executable(gui_syntax_tests tests/ui/syntax_tests.cpp)
+        target_link_libraries(gui_syntax_tests PRIVATE xray_ui)
+        add_dependencies(gui_syntax_tests code-xray)
+        add_test(NAME gui_syntax COMMAND gui_syntax_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-syntax")
+        set_tests_properties(gui_syntax PROPERTIES TIMEOUT 30)
 
         add_executable(gui_popup_tests tests/ui/popup_tests.cpp)
         target_link_libraries(gui_popup_tests PRIVATE xray_ui xray_code)

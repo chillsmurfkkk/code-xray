@@ -1,5 +1,7 @@
 #include "code_view.hpp"
+#include "cpp_syntax_highlighter.hpp"
 
+#include <QApplication>
 #include <QPaintEvent>
 #include <QEvent>
 #include <QFontMetrics>
@@ -39,6 +41,7 @@ CodeView::CodeView(QWidget* parent)
     setTabChangesFocus(true);
 
     lineNumberArea_ = new LineNumberArea(this);
+    highlighter_ = new CppSyntaxHighlighter(document(), QApplication::palette());
 
     connect(
         this,
@@ -102,6 +105,9 @@ void CodeView::changeEvent(QEvent* event) {
     case QEvent::PaletteChange:
         updateLineNumberAreaGeometry();
         lineNumberArea_->update();
+        // Application QSS can temporarily retain a widget's old Window role
+        // during repolishing. Syntax follows the shared application theme.
+        if (highlighter_) highlighter_->setPalette(QApplication::palette());
         break;
 
     default:
@@ -126,6 +132,7 @@ void CodeView::setSourceText(const QString& text) {
         }
     }
 
+    highlighter_->setSourceLineStarts(sourceLineStarts_);
     QPlainTextEdit::setPlainText(text);
 
     updateLineNumberAreaGeometry();

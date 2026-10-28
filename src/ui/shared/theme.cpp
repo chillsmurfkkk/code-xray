@@ -16,6 +16,19 @@ QColor blend(const QColor& from, const QColor& to, qreal amount) {
 }
 } // namespace
 
+SyntaxColors syntaxColors(const QPalette& palette) {
+    const bool dark =
+        palette.color(QPalette::Window).lightness() < 128;
+
+    return {
+        .keyword = QColor(dark ? "#fb4934" : "#9d0006"),
+        .number = QColor(dark ? "#d3869b" : "#8f3f71"),
+        .stringLiteral = QColor(dark ? "#b8bb26" : "#79740e"),
+        .comment = palette.color(QPalette::PlaceholderText),
+        .preprocessor = palette.color(QPalette::Accent)
+    };
+}
+
 void applyTheme(QApplication& application, Theme theme) {
     const bool dark = theme == Theme::dark;
     const QColor background(dark ? "#282828" : "#fbf1c7");
