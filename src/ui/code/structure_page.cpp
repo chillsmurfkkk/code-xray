@@ -1,5 +1,6 @@
 #include "structure_page.hpp"
 #include "ui/shared/icons.hpp"
+#include "code_view.hpp"
 
 #include <QApplication>
 #include <QEvent>
@@ -9,7 +10,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPainter>
-#include <QPlainTextEdit>
 #include <QSplitter>
 #include <QSplitterHandle>
 #include <QStackedWidget>
@@ -370,12 +370,11 @@ StructurePage::StructurePage(QWidget* parent) : QWidget(parent) {
 
     auto* codeContent = new QStackedWidget(codePanel);
     codeContent->setObjectName("sourceContent");
-    codeView_ = new QPlainTextEdit(codeContent);
+    codeView_ = new CodeView(codeContent);
     codeView_->setObjectName("sourceCode");
-    codeView_->setReadOnly(true);
-    codeView_->setLineWrapMode(QPlainTextEdit::NoWrap);
-    codeView_->setTabChangesFocus(true);
-    codeView_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    codeView_->setFont(
+        QFontDatabase::systemFont(QFontDatabase::FixedFont)
+    );
     codeView_->setAccessibleName(QString::fromUtf8("Код файла"));
     codeContent->addWidget(emptyState(Symbol::document,
         QString::fromUtf8("Виберіть файл"),
@@ -478,12 +477,11 @@ void StructurePage::setSnapshot(
     displayedUnit_.reset();
 
     tree_->clear();
-    codeView_->clear();
+    codeView_->setSourceText({});
     codeView_->setExtraSelections({});
     codeView_->setToolTip({});
     sourcePath_->clear();
     sourcePath_->setToolTip({});
-    sourceLineStarts_.clear();
 
     snapshot_ = std::move(snapshot);
 
@@ -562,12 +560,11 @@ void StructurePage::onEntitySelected(QTreeWidgetItem* item) {
 
     displayedUnit_.reset();
 
-    codeView_->clear();
+    codeView_->setSourceText({});
     codeView_->setExtraSelections({});
     codeView_->setToolTip({});
     sourcePath_->clear();
     sourcePath_->setToolTip({});
-    sourceLineStarts_.clear();
     codeContent_->setCurrentIndex(0);
 
     if (!item || !snapshot_) {
@@ -601,12 +598,7 @@ void StructurePage::onEntitySelected(QTreeWidgetItem* item) {
         return;
     }
 
-    sourceLineStarts_.push_back(0);
-    for (qsizetype position = 0; position < text.size(); ++position) {
-        if (text.at(position) == QLatin1Char('\n'))
-            sourceLineStarts_.push_back(static_cast<int>(position + 1));
-    }
-    codeView_->setPlainText(text);
+    codeView_->setSourceText(text);
 
     codeView_->setToolTip(
         QString::fromStdString(file->relativePath)
@@ -623,16 +615,18 @@ void StructurePage::onEntitySelected(QTreeWidgetItem* item) {
 void StructurePage::showEntityRange(QTreeWidgetItem* item) {
     updateRangeHighlight();
 
+    const auto& lineStarts = codeView_->sourceLineStarts();
+
     const auto startLine = item->data(0, StartLineRole)
         .toULongLong();
 
-    if (startLine > sourceLineStarts_.size()) {
+    if (startLine > lineStarts.size()) {
         return;
     }
 
     const int position = startLine == 0
         ? 0
-        : sourceLineStarts_[
+        : lineStarts[
             static_cast<std::size_t>(startLine - 1)
         ];
 
@@ -649,15 +643,17 @@ void StructurePage::updateRangeHighlight() {
     const auto* item = tree_->currentItem();
     if (!item) return;
 
+    const auto& lineStarts = codeView_->sourceLineStarts();
+
     const auto start = item->data(0, StartLineRole).toULongLong();
     const auto end = item->data(0, EndLineRole).toULongLong();
-    if (start == 0 || end < start || end > sourceLineStarts_.size()) return;
+    if (start == 0 || end < start || end > lineStarts.size()) return;
 
     auto* document = codeView_->document();
-    const int lastPosition = end == sourceLineStarts_.size()
+    const int lastPosition = end == lineStarts.size()
         ? document->characterCount() - 1
-        : sourceLineStarts_[static_cast<std::size_t>(end)] - 1;
-    const int firstPosition = sourceLineStarts_[static_cast<std::size_t>(start - 1)];
+        : lineStarts[static_cast<std::size_t>(end)] - 1;
+    const int firstPosition = lineStarts[static_cast<std::size_t>(start - 1)];
     if (lastPosition < firstPosition || lastPosition >= document->characterCount()) return;
 
     QTextEdit::ExtraSelection highlight;

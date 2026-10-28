@@ -6,12 +6,10 @@
 
 #include <cstddef>
 #include <memory>
-#include <vector>
 #include <optional>
 
 class QLabel;
 class QLineEdit;
-class QPlainTextEdit;
 class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -19,6 +17,8 @@ class QPushButton;
 class QComboBox;
 
 namespace xray::ui {
+
+class CodeView;
 
 class StructurePage : public QWidget {
     Q_OBJECT
@@ -55,7 +55,7 @@ private:
     QLabel* count_ = nullptr;
     QLineEdit* sourcePath_ = nullptr;
     QTreeWidget* tree_ = nullptr;
-    QPlainTextEdit* codeView_ = nullptr;
+    CodeView* codeView_ = nullptr;
     QStackedWidget* treeContent_ = nullptr;
     QStackedWidget* codeContent_ = nullptr;
     QWidget* emptyResult_ = nullptr;
@@ -74,11 +74,6 @@ private:
         std::optional<xray::code::EntityKind> kind,
         std::size_t& matchCount
     );
-
-    // Original LF-delimited source lines mapped to decoded document positions.
-    // Qt also treats paragraph separators as blocks, so block numbers alone
-    // cannot reliably represent source line numbers.
-    std::vector<int> sourceLineStarts_;
 
     enum ItemRole {
         UnitIndexRole = Qt::UserRole,
