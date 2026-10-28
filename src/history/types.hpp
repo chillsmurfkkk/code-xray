@@ -224,6 +224,37 @@ namespace xray::history {
         }
     };
 
+
+    class MergeCommitQuery : public HistoryQuery {
+    private:
+        bool onlyMerges;
+        std::size_t minParents;
+    public:
+        explicit MergeCommitQuery(bool mergesOnly = true, std::size_t minP = 2)
+            : onlyMerges(mergesOnly), minParents(minP) {
+            if (mergesOnly && minParents < 2) {
+                throw std::invalid_argument("MergeCommitQuery: minParents must be at least 2 when onlyMerges is true");
+            }
+        }
+
+        [[nodiscard]] std::vector<CommitRecord> apply(const std::vector<CommitRecord>& commits) const override {
+            std::vector<CommitRecord> result;
+            for (const auto& c : commits) {
+                if (onlyMerges) {
+                    if (c.parentOids.size() >= minParents) {
+                        result.push_back(c);
+                    }
+                }
+                else {
+                    if (c.parentOids.size() <= 1) {
+                        result.push_back(c);
+                    }
+                }
+            }
+            return result;
+        }
+    };
+
     class RevisionSelection {
     public:
         virtual ~RevisionSelection() = default;
@@ -377,6 +408,54 @@ namespace xray::history {
         }
     };
 
+
+    class LinearHistorySelection : public RevisionSelection {
+    private:
+        Oid startOid;
+        bool firstParentOnly;
+    public:
+        explicit LinearHistorySelection(Oid start, bool firstParent = true)
+            : startOid(std::move(start)), firstParentOnly(firstParent) {
+            if (startOid.empty()) {
+                throw std::invalid_argument("LinearHistorySelection: start OID cannot be empty");
+            }
+        }
+
+        [[nodiscard]] std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const override {
+            std::vector<CommitRecord> result;
+            if (commits.empty()) return result;
+
+            std::unordered_map<Oid, const CommitRecord*> commitMap;
+            commitMap.reserve(commits.size());
+            for (const auto& c : commits) {
+                commitMap[c.oid] = &c;
+            }
+
+            auto it = commitMap.find(startOid);
+            if (it == commitMap.end()) {
+                throw std::invalid_argument("LinearHistorySelection: start OID not found: " + startOid);
+            }
+
+            const CommitRecord* current = it->second;
+            std::unordered_set<Oid> visited;
+
+            while (current != nullptr) {
+                if (!visited.insert(current->oid).second) {
+                    break;
+                }
+                result.push_back(*current);
+                if (current->parentOids.empty()) {
+                    break;
+                }
+                const Oid& nextOid = current->parentOids.front();
+                auto nextIt = commitMap.find(nextOid);
+                current = (nextIt != commitMap.end()) ? nextIt->second : nullptr;
+            }
+
+            return result;
+        }
+    };
+
     template<typename T, typename KeyExtractor>
     std::vector<std::vector<T>> groupRecords(const std::vector<T>& records, KeyExtractor keyExtractor) {
         std::vector<std::vector<T>> groups;
@@ -399,6 +478,103 @@ namespace xray::history {
         }
 
         return groups;
+    }
+
+
+    struct CodeChurn {
+        std::size_t totalAddedLines = 0;
+        std::size_t totalDeletedLines = 0;
+        std::int64_t netLines = 0;
+        std::size_t binaryFilesCount = 0;
+        std::size_t modifiedFilesCount = 0;
+    };
+
+    [[nodiscard]] inline CodeChurn computeCodeChurn(const std::vector<ChangeRecord>& changes) {
+        CodeChurn churn{};
+        churn.modifiedFilesCount = changes.size();
+        for (const auto& ch : changes) {
+            if (ch.isBinary) {
+                churn.binaryFilesCount++;
+            }
+            if (ch.addedLines.has_value()) {
+                churn.totalAddedLines += *ch.addedLines;
+            }
+            if (ch.deletedLines.has_value()) {
+                churn.totalDeletedLines += *ch.deletedLines;
+            }
+        }
+        churn.netLines = static_cast<std::int64_t>(churn.totalAddedLines) - static_cast<std::int64_t>(churn.totalDeletedLines);
+        return churn;
+    }
+
+    [[nodiscard]] inline bool isAncestor(
+        const std::vector<CommitRecord>& commits,
+        const Oid& ancestorOid,
+        const Oid& descendantOid)
+    {
+        if (ancestorOid.empty()) {
+            throw std::invalid_argument("isAncestor: ancestor OID cannot be empty");
+        }
+        if (descendantOid.empty()) {
+            throw std::invalid_argument("isAncestor: descendant OID cannot be empty");
+        }
+        if (ancestorOid == descendantOid) {
+            return true;
+        }
+
+        std::unordered_map<Oid, const CommitRecord*> commitMap;
+        commitMap.reserve(commits.size());
+        for (const auto& c : commits) {
+            commitMap[c.oid] = &c;
+        }
+
+        if (commitMap.find(descendantOid) == commitMap.end()) {
+            throw std::invalid_argument("isAncestor: descendant OID not found in commits: " + descendantOid);
+        }
+
+        std::vector<Oid> queue = { descendantOid };
+        std::unordered_set<Oid> visited = { descendantOid };
+        std::size_t head = 0;
+
+        while (head < queue.size()) {
+            Oid currOid = queue[head++];
+            auto it = commitMap.find(currOid);
+            if (it == commitMap.end()) continue;
+
+            for (const auto& p : it->second->parentOids) {
+                if (p == ancestorOid) {
+                    return true;
+                }
+                if (visited.insert(p).second) {
+                    queue.push_back(p);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    [[nodiscard]] inline std::vector<ChangeRecord> filterChangesByStatus(
+        const std::vector<ChangeRecord>& changes,
+        ChangeStatus targetStatus)
+    {
+        std::vector<ChangeRecord> result;
+        for (const auto& ch : changes) {
+            if (ch.status == targetStatus) {
+                result.push_back(ch);
+            }
+        }
+        return result;
+    }
+
+    [[nodiscard]] inline std::vector<CommitRecord> sortCommitsChronologically(
+        std::vector<CommitRecord> commits,
+        bool ascending = true)
+    {
+        std::stable_sort(commits.begin(), commits.end(), [ascending](const CommitRecord& a, const CommitRecord& b) {
+            return ascending ? (a.authoredAt < b.authoredAt) : (a.authoredAt > b.authoredAt);
+        });
+        return commits;
     }
 
 } // namespace xray::history
