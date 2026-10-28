@@ -95,12 +95,17 @@ void applyTheme(QApplication& application, Theme theme) {
         QPushButton[role="primaryAction"]:focus { border-color: %7; }
         QPushButton[role="primaryAction"]:disabled { background: %2; color: %11; border-color: %4; }
 
+        QWidget#entityFilterPopup {
+            background: transparent;
+            border: none;
+        }
+
         QComboBox[role="inputField"] {
             background: %1;
             color: %5;
             border: 1px solid %4;
             border-radius: 8px;
-            padding: 6px 10px;
+            padding: 6px 36px 6px 10px;
         }
 
         QComboBox[role="inputField"]:hover:enabled {
@@ -116,10 +121,30 @@ void applyTheme(QApplication& application, Theme theme) {
             color: %11;
         }
 
+        QComboBox[role="inputField"]::drop-down {
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 30px;
+
+            background: transparent;
+            border: none;
+            border-top-right-radius: 8px;
+            border-bottom-right-radius: 8px;
+        }
+
+        QComboBox[role="inputField"]::down-arrow { width: 10px; height: 6px; }
         QComboBox[role="inputField"] QAbstractItemView {
             background: %2; color: %5; border: 1px solid %4;
+            border-radius: 8px; padding: 4px; outline: 0;
+
             selection-background-color: %3; selection-color: %5;
         }
+        QComboBox[role="inputField"] QAbstractItemView::item {
+            min-height: 24px; padding: 6px 10px;
+            border: none; border-radius: 6px;
+        }
+        QComboBox[role="inputField"] QAbstractItemView::item:hover:!selected { background: %9; }
+        QComboBox[role="inputField"] QAbstractItemView::item:selected { background: %3; color: %5; }
 
         QLineEdit[role="inputField"] {
             background: %1; color: %5; placeholder-text-color: %6;

@@ -1,6 +1,7 @@
 #include "app/main_window.hpp"
 #include "ui/shared/icons.hpp"
 #include "ui/shared/theme.hpp"
+#include "ui/shared/popup_style.hpp"
 
 #include <QApplication>
 #include <QDir>
@@ -39,7 +40,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setOrganizationName("CodeXrayGuiTests");
     app.setApplicationName("Design");
-    app.setStyle("Fusion");
+    xray::ui::installPopupStyle(app);
     const QString output = app.arguments().value(1);
     if (!output.isEmpty()) QDir().mkpath(output);
     QTemporaryDir settingsDirectory((output.isEmpty() ? QDir::tempPath() : output) + "/settings-XXXXXX");

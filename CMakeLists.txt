@@ -156,6 +156,7 @@ if(CODE_XRAY_BUILD_APP)
     add_library(xray_ui STATIC
         src/ui/shared/theme.cpp
         src/ui/shared/theme.hpp
+        src/ui/shared/popup_style.hpp
         src/ui/shared/icons.cpp
         src/ui/shared/icons.hpp
         src/ui/shared/navigation.cpp
@@ -189,6 +190,12 @@ if(CODE_XRAY_BUILD_APP)
         add_dependencies(gui_snapshot_tests code-xray)
         add_test(NAME gui_snapshot COMMAND gui_snapshot_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-snapshots")
         set_tests_properties(gui_snapshot PROPERTIES TIMEOUT 30)
+
+        add_executable(gui_popup_tests tests/ui/popup_tests.cpp)
+        target_link_libraries(gui_popup_tests PRIVATE xray_ui xray_code)
+        add_dependencies(gui_popup_tests code-xray)
+        add_test(NAME gui_popup COMMAND gui_popup_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-popups")
+        set_tests_properties(gui_popup PROPERTIES TIMEOUT 30)
 
         add_executable(parser_tests tests/code/parser_tests.cpp)
         target_link_libraries(parser_tests PRIVATE xray_code)

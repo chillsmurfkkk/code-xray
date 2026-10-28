@@ -2,6 +2,7 @@
 #include "ui/code/demo_snapshot.hpp"
 #include "ui/code/structure_page.hpp"
 #include "ui/shared/theme.hpp"
+#include "ui/shared/popup_style.hpp"
 
 #include <QApplication>
 #include <QComboBox>
@@ -151,7 +152,7 @@ void checkEntityFilters(const QString& directory) {
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
-    app.setStyle("Fusion");
+    xray::ui::installPopupStyle(app);
     const QString output = app.arguments().value(1);
     const QString testRoot = output.isEmpty() ? QDir::currentPath() : output;
     QDir().mkpath(testRoot);

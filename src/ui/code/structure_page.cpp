@@ -27,6 +27,7 @@
 #include <QVariant>
 #include <QPushButton>
 #include <QComboBox>
+#include <QListView>
 
 #include <algorithm>
 #include <limits>
@@ -236,6 +237,18 @@ StructurePage::StructurePage(QWidget* parent) : QWidget(parent) {
     );
     kindFilter->setMinimumHeight(36);
     kindFilter->setMinimumWidth(0);
+
+    auto* filterView = new QListView(kindFilter);
+    filterView->setMouseTracking(true);
+    filterView->setUniformItemSizes(true);
+    kindFilter->setView(filterView);
+    kindFilter->setItemDelegate(new QStyledItemDelegate(filterView));
+
+    auto* popup = filterView->window();
+    popup->setObjectName("entityFilterPopup");
+    popup->setWindowFlag(Qt::FramelessWindowHint, true);
+    popup->setWindowFlag(Qt::NoDropShadowWindowHint, true);
+    popup->setAttribute(Qt::WA_TranslucentBackground, true);
 
     kindFilter->addItem(QString::fromUtf8("Усі сутності"));
     kindFilter->addItem(
