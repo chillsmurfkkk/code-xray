@@ -78,7 +78,11 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
             switch (pageIndex) {
             case 0: contentStack_->setCurrentWidget(comparisonPage_); break;
             case 1: contentStack_->setCurrentWidget(trendPage_);      break;
-            case 2: contentStack_->setCurrentWidget(changeCardPage_); break;
+            case 2:
+                // При прямому кліку на вкладку в бічному меню ховаємо кнопку «Назад»
+                changeCardPage_->setBackButtonVisible(false);
+                contentStack_->setCurrentWidget(changeCardPage_);
+                break;
             case 3: contentStack_->setCurrentWidget(exportPage_);     break;
             default: break;
             }
@@ -89,8 +93,9 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     connect(comparisonPage_, &ui::review::ComparisonPage::reviewItemSelected, this, [this, navigation](int index) {
         const auto& report = comparisonPage_->currentReport();
         if (index >= 0 && index < static_cast<int>(report.items.size())) {
-            changeCardPage_->showItem(report.items[static_cast<std::size_t>(index)], report);
+            changeCardPage_->showItem(report.items[static_cast<std::size_t>(index)], report, /*fromComparison=*/true);
             navigation->setCurrentPage(ui::Section::review, 2);
+            changeCardPage_->setBackButtonVisible(true);
         }
     });
 
