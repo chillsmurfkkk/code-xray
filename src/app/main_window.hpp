@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 #include <stop_token>
+#include "code/types.hpp"
 
 #include "ui/shared/theme.hpp"
 
@@ -10,6 +11,7 @@ class QStackedWidget;
 
 namespace xray::ui {
 class StructurePage;
+namespace analysis_pages { class Workspace; }
 namespace review {
 class ComparisonPage;
 class TrendPage;
@@ -19,11 +21,13 @@ class ExportPage;
 }
 
 namespace xray::app {
+class AnalysisController;
 
 class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(ui::Theme theme, QWidget* parent = nullptr);
     ~MainWindow() override;
+    void setSnapshot(std::shared_ptr<const code::ParsedSnapshot> snapshot, bool demonstration = false);
 
 private:
     ui::Theme theme_;
@@ -37,6 +41,8 @@ private:
 
     QStackedWidget* contentStack_ = nullptr;
     ui::StructurePage* structure_ = nullptr;
+    AnalysisController* analysisController_ = nullptr;
+    ui::analysis_pages::Workspace* analysisPages_ = nullptr;
     ui::review::ComparisonPage* comparisonPage_ = nullptr;
     ui::review::TrendPage* trendPage_ = nullptr;
     ui::review::ChangeCardPage* changeCardPage_ = nullptr;
