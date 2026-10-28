@@ -1,6 +1,7 @@
 // ComparisonPage.cpp — D-UI1 «Порівняння»
 #include "ui/review/ComparisonPage.hpp"
 #include "ui/review/review_fixtures.hpp"
+#include "ui/review/review_table_delegate.hpp"
 #include "review/api.hpp"
 
 #include <QMessageBox>
@@ -30,10 +31,12 @@ ComparisonPage::ComparisonPage(QWidget* parent)
     pathFilterEdit_ = new QLineEdit;
     pathFilterEdit_->setPlaceholderText(QString::fromUtf8("Фільтр за шляхом…"));
     pathFilterEdit_->setMinimumHeight(32);
+    pathFilterEdit_->setProperty("role", "inputField");
     filterLayout->addWidget(pathFilterEdit_);
 
     kindFilterCombo_ = new QComboBox;
     kindFilterCombo_->setMinimumHeight(32);
+    kindFilterCombo_->setProperty("role", "inputField");
     kindFilterCombo_->addItem(QString::fromUtf8("Усі види"), -1);
     kindFilterCombo_->addItem(QString::fromUtf8("Змінено"), static_cast<int>(ReviewKind::changed));
     kindFilterCombo_->addItem(QString::fromUtf8("Додано"), static_cast<int>(ReviewKind::added));
@@ -48,12 +51,14 @@ ComparisonPage::ComparisonPage(QWidget* parent)
 
     compareButton_ = new QPushButton(QString::fromUtf8("Порівняти"));
     compareButton_->setMinimumHeight(32);
+    compareButton_->setProperty("role", "primaryAction");
     filterLayout->addWidget(compareButton_);
 
     mainLayout->addLayout(filterLayout);
 
     // --- Підсумок ---
     summaryLabel_ = new QLabel;
+    summaryLabel_->setObjectName("statusPill");
     mainLayout->addWidget(summaryLabel_);
 
     // --- Таблиця змін ---
@@ -67,10 +72,7 @@ ComparisonPage::ComparisonPage(QWidget* parent)
         QString::fromUtf8("Пояснення"),
     });
     reviewTable_->horizontalHeader()->setStretchLastSection(true);
-    reviewTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    reviewTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    reviewTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    reviewTable_->verticalHeader()->setDefaultSectionSize(28);
+    setupReviewTable(reviewTable_);
     mainLayout->addWidget(reviewTable_, /*stretch=*/1);
 
     // --- Підключення сигналів ---
@@ -126,23 +128,56 @@ void ComparisonPage::setReport(const ComparisonReport& report)
 
 void ComparisonPage::populateTable(const std::vector<ReviewItem>& items)
 {
+    const bool dark = palette().color(QPalette::Window).lightness() < 128;
+    const QColor addedColor(dark ? "#8ec07c" : "#427b58");
+    const QColor removedColor(dark ? "#fb4934" : "#9d0006");
+    const QColor changedColor(dark ? "#fe8019" : "#af3a03");
+    const QColor unchangedColor(dark ? "#a89984" : "#7c6f64");
+
     reviewTable_->setRowCount(static_cast<int>(items.size()));
     for (int row = 0; row < static_cast<int>(items.size()); ++row) {
         const auto& item = items[static_cast<std::size_t>(row)];
-        reviewTable_->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(item.entityKey)));
-        reviewTable_->setItem(row, 1, new QTableWidgetItem(kindToString(item.kind)));
+        auto* fnItem = new QTableWidgetItem(QString::fromStdString(item.entityKey));
+        auto* kindItem = new QTableWidgetItem(kindToString(item.kind));
+
+        if (item.kind == ReviewKind::added) {
+            kindItem->setForeground(addedColor);
+        } else if (item.kind == ReviewKind::removed) {
+            kindItem->setForeground(removedColor);
+        } else if (item.kind == ReviewKind::changed) {
+            kindItem->setForeground(changedColor);
+        } else if (item.kind == ReviewKind::unchanged) {
+            kindItem->setForeground(unchangedColor);
+        }
+
         const auto path = item.sourceRefs.empty() ? "" : item.sourceRefs.front().relativePath;
-        reviewTable_->setItem(row, 2, new QTableWidgetItem(QString::fromStdString(path)));
-        reviewTable_->setItem(row, 3, new QTableWidgetItem(confidenceToString(item.confidence)));
-        reviewTable_->setItem(row, 4, new QTableWidgetItem(QString::fromStdString(item.explanation)));
+        auto* pathItem = new QTableWidgetItem(QString::fromStdString(path));
+        auto* confItem = new QTableWidgetItem(confidenceToString(item.confidence));
+        auto* expItem = new QTableWidgetItem(QString::fromStdString(item.explanation));
+
+        reviewTable_->setItem(row, 0, fnItem);
+        reviewTable_->setItem(row, 1, kindItem);
+        reviewTable_->setItem(row, 2, pathItem);
+        reviewTable_->setItem(row, 3, confItem);
+        reviewTable_->setItem(row, 4, expItem);
     }
     reviewTable_->resizeColumnsToContents();
 }
 
 void ComparisonPage::updateSummary(const std::vector<ReviewItem>& items)
 {
-    auto summary = summarizeComparison(items);
-    summaryLabel_->setText(QString::fromUtf8("Підсумок: ") + QString::fromStdString(summary));
+    int added = 0, removed = 0, changed = 0, unchanged = 0;
+    for (const auto& it : items) {
+        switch (it.kind) {
+        case ReviewKind::added: ++added; break;
+        case ReviewKind::removed: ++removed; break;
+        case ReviewKind::changed: ++changed; break;
+        case ReviewKind::unchanged: ++unchanged; break;
+        default: break;
+        }
+    }
+    summaryLabel_->setText(QString::fromUtf8("Підсумок:  Додано: %1  •  Видалено: %2  •  Змінено: %3  •  Без змін: %4")
+        .arg(added).arg(removed).arg(changed).arg(unchanged));
 }
 
 QString ComparisonPage::kindToString(ReviewKind kind)

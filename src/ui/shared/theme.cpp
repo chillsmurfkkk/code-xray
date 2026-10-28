@@ -194,12 +194,16 @@ void applyTheme(QApplication& application, Theme theme) {
         }
         QWidget#pagesPanel QScrollBar:vertical,
         QTreeWidget#structureTree QScrollBar:vertical,
-        QPlainTextEdit#sourceCode QScrollBar:vertical {
+        QPlainTextEdit#sourceCode QScrollBar:vertical,
+        QTableWidget QScrollBar:vertical,
+        QTableView QScrollBar:vertical {
             width: 8px; background: transparent; margin: 0;
         }
         QWidget#pagesPanel QScrollBar::handle:vertical,
         QTreeWidget#structureTree QScrollBar::handle:vertical,
-        QPlainTextEdit#sourceCode QScrollBar::handle:vertical {
+        QPlainTextEdit#sourceCode QScrollBar::handle:vertical,
+        QTableWidget QScrollBar::handle:vertical,
+        QTableView QScrollBar::handle:vertical {
             background: %4; min-height: 28px; border-radius: 4px;
         }
         QWidget#pagesPanel QScrollBar::add-line:vertical,
@@ -207,13 +211,52 @@ void applyTheme(QApplication& application, Theme theme) {
         QTreeWidget#structureTree QScrollBar::add-line:vertical,
         QTreeWidget#structureTree QScrollBar::sub-line:vertical,
         QPlainTextEdit#sourceCode QScrollBar::add-line:vertical,
-        QPlainTextEdit#sourceCode QScrollBar::sub-line:vertical { height: 0; }
+        QPlainTextEdit#sourceCode QScrollBar::sub-line:vertical,
+        QTableWidget QScrollBar::add-line:vertical,
+        QTableWidget QScrollBar::sub-line:vertical,
+        QTableView QScrollBar::add-line:vertical,
+        QTableView QScrollBar::sub-line:vertical { height: 0; }
         QWidget#pagesPanel QScrollBar::add-page:vertical,
         QWidget#pagesPanel QScrollBar::sub-page:vertical,
         QTreeWidget#structureTree QScrollBar::add-page:vertical,
         QTreeWidget#structureTree QScrollBar::sub-page:vertical,
         QPlainTextEdit#sourceCode QScrollBar::add-page:vertical,
-        QPlainTextEdit#sourceCode QScrollBar::sub-page:vertical { background: none; }
+        QPlainTextEdit#sourceCode QScrollBar::sub-page:vertical,
+        QTableWidget QScrollBar::add-page:vertical,
+        QTableWidget QScrollBar::sub-page:vertical,
+        QTableView QScrollBar::add-page:vertical,
+        QTableView QScrollBar::sub-page:vertical { background: none; }
+
+        QTableWidget, QTableView {
+            background-color: %2;
+            color: %5;
+            border: 1px solid %4;
+            border-radius: 12px;
+            gridline-color: transparent;
+            outline: 0;
+            padding: 2px;
+        }
+        QTableWidget:focus, QTableView:focus {
+            border-color: %7;
+        }
+        QHeaderView {
+            background-color: transparent;
+            border: none;
+        }
+        QHeaderView::section {
+            background-color: %2;
+            color: %6;
+            padding: 8px 12px;
+            border: none;
+            border-bottom: 1px solid %4;
+            font-weight: 600;
+        }
+        QHeaderView::section:horizontal:first {
+            border-top-left-radius: 10px;
+        }
+        QHeaderView::section:horizontal:last {
+            border-top-right-radius: 10px;
+        }
     )QSS")
         .arg(background.name(), surface.name(), selection.name(), seam.name(), text.name(),
              secondaryText.name(), accent.name(), surface.lighter(dark ? 104 : 101).name(),
