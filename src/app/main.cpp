@@ -2,6 +2,7 @@
 #include "windows_uia_filter.hpp"
 
 #include "ui/shared/theme.hpp"
+#include "ui/shared/popup_style.hpp"
 
 #include <QApplication>
 #include <QTimer>
@@ -19,7 +20,7 @@ int main(int argc, char* argv[]) {
 
     application.setOrganizationName("CodeXRay");
     application.setApplicationName("CodeXRay");
-    application.setStyle("Fusion");
+    xray::ui::installPopupStyle(application);
 
     const auto theme = xray::ui::loadTheme();
     xray::ui::applyTheme(application, theme);
