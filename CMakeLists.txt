@@ -165,6 +165,8 @@ if(CODE_XRAY_BUILD_APP)
         src/ui/code/structure_page.hpp
         src/ui/code/demo_snapshot.cpp
         src/ui/code/demo_snapshot.hpp
+        src/ui/code/code_view.cpp
+        src/ui/code/code_view.hpp
     )
     set_target_properties(xray_ui PROPERTIES AUTOMOC ON)
     target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common)
