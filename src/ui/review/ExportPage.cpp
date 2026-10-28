@@ -28,18 +28,21 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent)
     paramsLayout->addWidget(new QLabel(QString::fromUtf8("Формат:")));
     formatCombo_ = new QComboBox;
     formatCombo_->setMinimumHeight(32);
+    formatCombo_->setProperty("role", "inputField");
     formatCombo_->addItem("HTML", static_cast<int>(ExportFormat::html));
     formatCombo_->addItem("JSON", static_cast<int>(ExportFormat::json));
     paramsLayout->addWidget(formatCombo_);
 
     pathEdit_ = new QLineEdit;
     pathEdit_->setMinimumHeight(32);
+    pathEdit_->setProperty("role", "inputField");
     pathEdit_->setPlaceholderText(QString::fromUtf8("Шлях для збереження…"));
     paramsLayout->addWidget(pathEdit_, /*stretch=*/1);
 
     auto* browseButton = new QPushButton("…");
     browseButton->setFixedWidth(40);
     browseButton->setMinimumHeight(32);
+    browseButton->setProperty("role", "primaryAction");
     connect(browseButton, &QPushButton::clicked, this, [this]() {
         auto suffix = formatCombo_->currentData().toInt() == static_cast<int>(ExportFormat::html)
             ? "HTML (*.html)" : "JSON (*.json)";
@@ -61,16 +64,19 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent)
 
     previewButton_ = new QPushButton(QString::fromUtf8("Попередній перегляд"));
     previewButton_->setMinimumHeight(32);
+    previewButton_->setProperty("role", "primaryAction");
     actionsLayout->addWidget(previewButton_);
 
     exportButton_ = new QPushButton(QString::fromUtf8("Зберегти"));
     exportButton_->setMinimumHeight(32);
+    exportButton_->setProperty("role", "primaryAction");
     actionsLayout->addWidget(exportButton_);
 
     mainLayout->addLayout(actionsLayout);
 
     // --- Статус ---
     statusLabel_ = new QLabel;
+    statusLabel_->setObjectName("statusPill");
     mainLayout->addWidget(statusLabel_);
 
     // --- Область попереднього перегляду ---

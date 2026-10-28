@@ -177,6 +177,7 @@ if(CODE_XRAY_BUILD_APP)
         src/ui/review/ChangeCardPage.hpp
         src/ui/review/ExportPage.cpp
         src/ui/review/ExportPage.hpp
+        src/ui/review/review_table_delegate.hpp
     )
     set_target_properties(xray_ui PROPERTIES AUTOMOC ON)
     target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common xray_review)

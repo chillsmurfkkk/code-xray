@@ -1,5 +1,6 @@
 // ChangeCardPage.cpp — D-UI3 «Картка зміни»
 #include "ui/review/ChangeCardPage.hpp"
+#include "ui/review/review_table_delegate.hpp"
 #include "ui/code/code_view.hpp"
 
 #include <QFont>
@@ -92,8 +93,7 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
         QString::fromUtf8("Різниця"),
     });
     metricsTable_->horizontalHeader()->setStretchLastSection(true);
-    metricsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    metricsTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    setupReviewTable(metricsTable_);
     connect(metricsTable_, &QTableWidget::cellClicked, this, &ChangeCardPage::onMetricRowSelected);
     bottomLayout->addWidget(metricsTable_);
 
@@ -106,6 +106,7 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
 
     historyButton_ = new QPushButton(QString::fromUtf8("Історія файла"));
     historyButton_->setMinimumHeight(32);
+    historyButton_->setProperty("role", "primaryAction");
     connect(historyButton_, &QPushButton::clicked, this, &ChangeCardPage::onFileHistoryRequested);
     findingsLayout->addWidget(historyButton_);
 
