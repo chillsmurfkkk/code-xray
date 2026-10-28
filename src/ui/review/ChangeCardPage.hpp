@@ -26,10 +26,14 @@ public:
 
     /// Відобразити конкретний ReviewItem зі звіту.
     void showItem(const xray::review::ReviewItem& item,
-                  const xray::review::ComparisonReport& report);
+                  const xray::review::ComparisonReport& report,
+                  bool fromComparison = true);
+
+    /// Керування видимістю кнопки «Назад»
+    void setBackButtonVisible(bool visible);
 
 signals:
-    /// Повернення до таблиці порівняння
+    /// Повернення до таблиці порівняння (коли перейшли з таблички)
     void backToComparisonRequested();
 
     /// D-H09: запит переходу до історії файла.
