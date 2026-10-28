@@ -85,9 +85,9 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         }
     });
 
-    // Зв'язуємо вибір рядка в таблиці порівняння з відкриттям «Картки зміни»
+    // Зв'язуємо вибір рядка в таблиці порівняння з відкриттям «Картки зміни» [P1]
     connect(comparisonPage_, &ui::review::ComparisonPage::reviewItemSelected, this, [this](int index) {
-        auto report = ui::review::makeDemoComparisonReport();
+        const auto& report = comparisonPage_->currentReport();
         if (index >= 0 && index < static_cast<int>(report.items.size())) {
             changeCardPage_->showItem(report.items[static_cast<std::size_t>(index)], report);
             contentStack_->setCurrentWidget(changeCardPage_);

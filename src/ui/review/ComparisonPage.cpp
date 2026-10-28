@@ -17,13 +17,24 @@ ComparisonPage::ComparisonPage(QWidget* parent)
     mainLayout->setContentsMargins(16, 16, 16, 16);
     mainLayout->setSpacing(12);
 
-    // --- Заголовок ---
+    // --- Заголовок та індикатор демо ---
+    auto* headerLayout = new QHBoxLayout;
     auto* titleLabel = new QLabel(QString::fromUtf8("Порівняння"));
     auto titleFont = titleLabel->font();
     titleFont.setPointSizeF(titleFont.pointSizeF() + 4);
     titleFont.setWeight(QFont::Bold);
     titleLabel->setFont(titleFont);
-    mainLayout->addWidget(titleLabel);
+    headerLayout->addWidget(titleLabel);
+
+    demoBadge_ = new QLabel(QString::fromUtf8("Демо-режим"));
+    demoBadge_->setStyleSheet(
+        "background: #d65d0e; color: #ebdbb2; font-weight: bold; "
+        "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
+    );
+    demoBadge_->setToolTip(QString::fromUtf8("Відображаються демонстраційні фікстури. Завантажте папку проєкту для реального аналізу."));
+    headerLayout->addWidget(demoBadge_);
+    headerLayout->addStretch();
+    mainLayout->addLayout(headerLayout);
 
     // --- Панель фільтрів ---
     auto* filterLayout = new QHBoxLayout;
@@ -84,18 +95,17 @@ ComparisonPage::ComparisonPage(QWidget* parent)
     connect(reviewTable_, &QTableWidget::cellClicked, this, &ComparisonPage::onTableRowSelected);
 
     // Завантажити демо-дані
-    setReport(makeDemoComparisonReport());
+    setReport(makeDemoComparisonReport(), /*isDemo=*/true);
 }
 
 // D-H01: запуск порівняння
 void ComparisonPage::onCompareRequested()
 {
-    // DEMO: перебудовуємо звіт із фікстурних даних.
-    // У реальній версії тут буде виклик координатора C.
-    setReport(makeDemoComparisonReport());
+    // DEMO: перебудовуємо звіт із фікстурних даних
+    setReport(makeDemoComparisonReport(), /*isDemo=*/true);
 }
 
-// D-H02: фільтрація таблиці
+// D-H02: фільтрація таблиці з фіксацією оригінальних індексів [P1]
 void ComparisonPage::onReviewFilterChanged()
 {
     const auto pathText = pathFilterEdit_->text().toStdString();
@@ -106,27 +116,54 @@ void ComparisonPage::onReviewFilterChanged()
     }
     const bool showUnknown = showUnknownCheck_->isChecked();
 
-    auto filtered = filterReviewItems(currentReport_.items, /*textFilter=*/"",
-                                      pathText, kindFilter, showUnknown);
-    populateTable(filtered);
-    updateSummary(filtered);
+    currentFilteredRows_.clear();
+    for (int i = 0; i < static_cast<int>(currentReport_.items.size()); ++i) {
+        const auto& it = currentReport_.items[static_cast<std::size_t>(i)];
+
+        if (!showUnknown && it.confidence == Confidence::incomplete) continue;
+        if (kindFilter.has_value() && it.kind != *kindFilter) continue;
+
+        if (!pathText.empty()) {
+            bool matchesPath = false;
+            for (const auto& ref : it.sourceRefs) {
+                if (ref.relativePath.find(pathText) != std::string::npos) {
+                    matchesPath = true;
+                    break;
+                }
+            }
+            if (!matchesPath) continue;
+        }
+
+        currentFilteredRows_.push_back({it, i});
+    }
+
+    populateTable();
+    updateSummary();
 }
 
-// D-H03: вибір рядка
+// D-H03: вибір рядка — передаємо оригінальний індекс сутності у звіті [P1]
 void ComparisonPage::onTableRowSelected(int row, int /*column*/)
 {
-    if (row >= 0 && row < static_cast<int>(currentReport_.items.size())) {
-        emit reviewItemSelected(row);
+    if (row >= 0 && row < reviewTable_->rowCount()) {
+        auto* item = reviewTable_->item(row, 0);
+        if (item) {
+            int originalIndex = item->data(Qt::UserRole).toInt();
+            emit reviewItemSelected(originalIndex);
+        }
     }
 }
 
-void ComparisonPage::setReport(const ComparisonReport& report)
+void ComparisonPage::setReport(const ComparisonReport& report, bool isDemo)
 {
     currentReport_ = report;
+    isDemo_ = isDemo;
+    if (demoBadge_) {
+        demoBadge_->setVisible(isDemo_);
+    }
     onReviewFilterChanged();
 }
 
-void ComparisonPage::populateTable(const std::vector<ReviewItem>& items)
+void ComparisonPage::populateTable()
 {
     const bool dark = palette().color(QPalette::Window).lightness() < 128;
     const QColor addedColor(dark ? "#8ec07c" : "#427b58");
@@ -134,12 +171,16 @@ void ComparisonPage::populateTable(const std::vector<ReviewItem>& items)
     const QColor changedColor(dark ? "#fe8019" : "#af3a03");
     const QColor unchangedColor(dark ? "#a89984" : "#7c6f64");
 
-    reviewTable_->setRowCount(static_cast<int>(items.size()));
-    for (int row = 0; row < static_cast<int>(items.size()); ++row) {
-        const auto& item = items[static_cast<std::size_t>(row)];
-        auto* fnItem = new QTableWidgetItem(QString::fromStdString(item.entityKey));
-        auto* kindItem = new QTableWidgetItem(kindToString(item.kind));
+    reviewTable_->setRowCount(static_cast<int>(currentFilteredRows_.size()));
+    for (int row = 0; row < static_cast<int>(currentFilteredRows_.size()); ++row) {
+        const auto& entry = currentFilteredRows_[static_cast<std::size_t>(row)];
+        const auto& item = entry.item;
 
+        auto* fnItem = new QTableWidgetItem(QString::fromStdString(item.entityKey));
+        // Зберігаємо оригінальний індекс для коректної навігації після фільтрації [P1]
+        fnItem->setData(Qt::UserRole, entry.originalIndex);
+
+        auto* kindItem = new QTableWidgetItem(kindToString(item.kind));
         if (item.kind == ReviewKind::added) {
             kindItem->setForeground(addedColor);
         } else if (item.kind == ReviewKind::removed) {
@@ -164,11 +205,11 @@ void ComparisonPage::populateTable(const std::vector<ReviewItem>& items)
     reviewTable_->resizeColumnsToContents();
 }
 
-void ComparisonPage::updateSummary(const std::vector<ReviewItem>& items)
+void ComparisonPage::updateSummary()
 {
     int added = 0, removed = 0, changed = 0, unchanged = 0;
-    for (const auto& it : items) {
-        switch (it.kind) {
+    for (const auto& entry : currentFilteredRows_) {
+        switch (entry.item.kind) {
         case ReviewKind::added: ++added; break;
         case ReviewKind::removed: ++removed; break;
         case ReviewKind::changed: ++changed; break;
@@ -176,8 +217,9 @@ void ComparisonPage::updateSummary(const std::vector<ReviewItem>& items)
         default: break;
         }
     }
-    summaryLabel_->setText(QString::fromUtf8("Підсумок:  Додано: %1  •  Видалено: %2  •  Змінено: %3  •  Без змін: %4")
-        .arg(added).arg(removed).arg(changed).arg(unchanged));
+    const QString prefix = isDemo_ ? QString::fromUtf8("[Демо] ") : "";
+    summaryLabel_->setText(QString::fromUtf8("%1Підсумок:  Додано: %2  •  Видалено: %3  •  Змінено: %4  •  Без змін: %5")
+        .arg(prefix).arg(added).arg(removed).arg(changed).arg(unchanged));
 }
 
 QString ComparisonPage::kindToString(ReviewKind kind)

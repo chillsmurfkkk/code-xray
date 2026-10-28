@@ -52,7 +52,7 @@ inline xray::review::ComparisonReport makeDemoComparisonReport() {
     fnAddBase->name = "add";
     fnAddBase->identityKey = "add(int,int)";
     fnAddBase->relativePath = "src/math.cpp";
-    fnAddBase->range = {0, 42, 1, 3};
+    fnAddBase->range = {0, 43, 1, 3};
     fnAddBase->validity = Validity::valid;
 
     auto fnMulBase = std::make_shared<FunctionEntity>();
@@ -60,7 +60,7 @@ inline xray::review::ComparisonReport makeDemoComparisonReport() {
     fnMulBase->name = "multiply";
     fnMulBase->identityKey = "multiply(int,int)";
     fnMulBase->relativePath = "src/math.cpp";
-    fnMulBase->range = {44, 150, 5, 9};
+    fnMulBase->range = {45, 159, 5, 9};
     fnMulBase->validity = Validity::valid;
 
     auto fnOldBase = std::make_shared<FunctionEntity>();
@@ -68,7 +68,7 @@ inline xray::review::ComparisonReport makeDemoComparisonReport() {
     fnOldBase->name = "oldFunction";
     fnOldBase->identityKey = "oldFunction()";
     fnOldBase->relativePath = "src/math.cpp";
-    fnOldBase->range = {152, 190, 11, 13};
+    fnOldBase->range = {161, 198, 11, 13};
     fnOldBase->validity = Validity::valid;
 
     // --- FunctionEntities (target) ---
@@ -77,7 +77,7 @@ inline xray::review::ComparisonReport makeDemoComparisonReport() {
     fnAddTarget->name = "add";
     fnAddTarget->identityKey = "add(int,int)";
     fnAddTarget->relativePath = "src/math.cpp";
-    fnAddTarget->range = {0, 42, 1, 3};
+    fnAddTarget->range = {0, 43, 1, 3};
     fnAddTarget->validity = Validity::valid;
 
     auto fnMulTarget = std::make_shared<FunctionEntity>();
@@ -85,7 +85,7 @@ inline xray::review::ComparisonReport makeDemoComparisonReport() {
     fnMulTarget->name = "multiply";
     fnMulTarget->identityKey = "multiply(int,int)";
     fnMulTarget->relativePath = "src/math.cpp";
-    fnMulTarget->range = {44, 120, 5, 8};
+    fnMulTarget->range = {45, 118, 5, 8};
     fnMulTarget->validity = Validity::valid;
 
     auto fnNewTarget = std::make_shared<FunctionEntity>();
@@ -93,7 +93,7 @@ inline xray::review::ComparisonReport makeDemoComparisonReport() {
     fnNewTarget->name = "newHelper";
     fnNewTarget->identityKey = "newHelper()";
     fnNewTarget->relativePath = "src/math.cpp";
-    fnNewTarget->range = {122, 160, 10, 12};
+    fnNewTarget->range = {120, 153, 10, 12};
     fnNewTarget->validity = Validity::valid;
 
     // --- ParsedUnits ---
@@ -169,8 +169,8 @@ inline xray::review::ComparisonReport makeDemoComparisonReport() {
         item.explanation = "Function 'add(int,int)' is present in both snapshots with no detected changes.";
         item.confidence = Confidence::exact;
         item.sourceRefs = {
-            {"src-base-001", "src/math.cpp", "fn-add-base", {0, 42, 1, 3}},
-            {"src-target-001", "src/math.cpp", "fn-add-target", {0, 42, 1, 3}},
+            {"src-base-001", "src/math.cpp", "fn-add-base", {0, 43, 1, 3}},
+            {"src-target-001", "src/math.cpp", "fn-add-target", {0, 43, 1, 3}},
         };
         item.metrics = {
             {MetricId::function_lines, 3, 3, 0},
@@ -192,8 +192,8 @@ inline xray::review::ComparisonReport makeDemoComparisonReport() {
                            " 1 resolved finding(s).";
         item.confidence = Confidence::exact;
         item.sourceRefs = {
-            {"src-base-001", "src/math.cpp", "fn-mul-base", {44, 150, 5, 9}},
-            {"src-target-001", "src/math.cpp", "fn-mul-target", {44, 120, 5, 8}},
+            {"src-base-001", "src/math.cpp", "fn-mul-base", {45, 159, 5, 9}},
+            {"src-target-001", "src/math.cpp", "fn-mul-target", {45, 118, 5, 8}},
         };
         item.metrics = {
             {MetricId::function_lines, 5, 4, -1},
@@ -217,7 +217,7 @@ inline xray::review::ComparisonReport makeDemoComparisonReport() {
         item.explanation = "Function 'oldFunction()' was removed in the target snapshot.";
         item.confidence = Confidence::exact;
         item.sourceRefs = {
-            {"src-base-001", "src/math.cpp", "fn-old-base", {152, 190, 11, 13}},
+            {"src-base-001", "src/math.cpp", "fn-old-base", {161, 198, 11, 13}},
         };
         item.metrics = {
             {MetricId::function_lines, 3, std::nullopt, std::nullopt},
@@ -236,7 +236,7 @@ inline xray::review::ComparisonReport makeDemoComparisonReport() {
         item.explanation = "Function 'newHelper()' was added in the target snapshot.";
         item.confidence = Confidence::exact;
         item.sourceRefs = {
-            {"src-target-001", "src/math.cpp", "fn-new-target", {122, 160, 10, 12}},
+            {"src-target-001", "src/math.cpp", "fn-new-target", {120, 153, 10, 12}},
         };
         item.metrics = {
             {MetricId::function_lines, std::nullopt, 3, std::nullopt},
