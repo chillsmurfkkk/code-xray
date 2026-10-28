@@ -48,7 +48,11 @@ NavigationPanel::NavigationPanel(QWidget* parent) : QFrame(parent) {
     codeButton_->setAutoExclusive(true);
     codeButton_->setChecked(true);
 
-    addSection(Symbol::analysis, QString::fromUtf8("Аналіз"), false);
+    analysisButton_ = addSection(Symbol::analysis, QString::fromUtf8("Аналіз"), true);
+    analysisButton_->setObjectName("analysisSection");
+    analysisButton_->setCheckable(true);
+    analysisButton_->setAutoExclusive(true);
+    connect(analysisButton_, &QToolButton::clicked, this, [this] { showSection(Section::analysis); });
     addSection(Symbol::history, QString::fromUtf8("Історія"), false);
 
     compareButton_ = addSection(Symbol::compare, QString::fromUtf8("Порівняння"), true);
@@ -141,6 +145,14 @@ void NavigationPanel::showSection(Section section) {
         addPage(Symbol::structure, QString::fromUtf8("Структура"), true);
         addPage(Symbol::diagnostics, QString::fromUtf8("Діагностика"), false);
         pagesList_->setCurrentRow(2);
+    } else if (section == Section::analysis) {
+        sectionTitle_->setText(QString::fromUtf8("Аналіз"));
+        sectionSubtitle_->setText(QString::fromUtf8("Метрики та правила"));
+        addPage(Symbol::document, QString::fromUtf8("Профілі"), true);
+        addPage(Symbol::analysis, QString::fromUtf8("Метрики"), true);
+        addPage(Symbol::filter, QString::fromUtf8("Правила"), true);
+        addPage(Symbol::diagnostics, QString::fromUtf8("Порушення"), true);
+        pagesList_->setCurrentRow(1);
     } else if (section == Section::review) {
         sectionTitle_->setText(QString::fromUtf8("Порівняння"));
         sectionSubtitle_->setText(QString::fromUtf8("Зміни, тренди та експорт"));
@@ -173,7 +185,9 @@ void NavigationPanel::setTheme(Theme theme) {
 void NavigationPanel::setCurrentPage(Section section, int pageIndex) {
     if (currentSection_ != section) {
         showSection(section);
-        if (section == Section::review && compareButton_) {
+        if (section == Section::analysis && analysisButton_) {
+            analysisButton_->setChecked(true);
+        } else if (section == Section::review && compareButton_) {
             compareButton_->setChecked(true);
         } else if (section == Section::code && codeButton_) {
             codeButton_->setChecked(true);

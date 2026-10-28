@@ -1,4 +1,6 @@
 #include "main_window.hpp"
+#include "app/analysis_controller.hpp"
+#include "ui/analysis/workspace.hpp"
 #include "ui/code/structure_page.hpp"
 #include "ui/shared/navigation.hpp"
 #include "ui/shared/theme.hpp"
@@ -48,10 +50,18 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
 
     // Сторінка розділу Код
     structure_ = new ui::StructurePage(contentStack_);
-    if (qApp->arguments().contains("--demo")) {
-        structure_->setSnapshot(ui::makeDemoSnapshot(), true);
-    }
     contentStack_->addWidget(structure_);
+
+    analysisController_ = new AnalysisController(this);
+    analysisPages_ = new ui::analysis_pages::Workspace(analysisController_->session(), contentStack_);
+    contentStack_->addWidget(analysisPages_);
+    connect(analysisController_, &AnalysisController::progressChanged,
+            analysisPages_, &ui::analysis_pages::Workspace::setProgress);
+    connect(analysisPages_, &ui::analysis_pages::Workspace::cancelRequested,
+            analysisController_, &AnalysisController::cancel);
+    if (qApp->arguments().contains("--demo")) {
+        setSnapshot(ui::makeDemoSnapshot(), true);
+    }
 
     // Сторінки розділу Порівняння (Модуль D)
     comparisonPage_ = new ui::review::ComparisonPage(contentStack_);
@@ -74,6 +84,9 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
             if (pageIndex == 2) { // Структура
                 contentStack_->setCurrentWidget(structure_);
             }
+        } else if (section == ui::Section::analysis) {
+            analysisPages_->setCurrentPage(pageIndex);
+            contentStack_->setCurrentWidget(analysisPages_);
         } else if (section == ui::Section::review) {
             switch (pageIndex) {
             case 0: contentStack_->setCurrentWidget(comparisonPage_); break;
@@ -143,6 +156,8 @@ void MainWindow::loadDirectory(
         return;
     }
 
+    analysisController_->setInput(nullptr);
+
     code::SourceRequest request;
     request.root = std::filesystem::path(directory.toStdU16String());
 
@@ -195,7 +210,7 @@ void MainWindow::loadDirectory(
 
             if (auto* snapshot =
                     std::get_if<code::ParsedSnapshot>(result.get())) {
-                structure->setSnapshot(
+                setSnapshot(
                     std::make_shared<const code::ParsedSnapshot>(
                         std::move(*snapshot)
                     )
@@ -232,6 +247,14 @@ MainWindow::~MainWindow() {
     if (sourceThread_) {
         sourceThread_->wait();
     }
+}
+
+void MainWindow::setSnapshot(std::shared_ptr<const code::ParsedSnapshot> snapshot, bool demonstration) {
+    structure_->setSnapshot(snapshot, demonstration);
+    analysisPages_->setContext(!snapshot ? QString::fromUtf8("Відкрийте папку у розділі «Код → Структура».")
+        : demonstration ? QString::fromUtf8("Демонстраційний знімок")
+                        : QString::fromUtf8("Поточний знімок відкритої папки"));
+    analysisController_->setInput(std::move(snapshot));
 }
 
 } // namespace xray::app

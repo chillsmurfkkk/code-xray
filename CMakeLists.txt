@@ -152,8 +152,19 @@ if(CODE_XRAY_BUILD_APP)
         unofficial::tree-sitter::tree-sitter
     )
 
+    if(NOT CODE_XRAY_BUILD_PROFILES)
+        message(FATAL_ERROR "Analysis pages require CODE_XRAY_BUILD_PROFILES=ON")
+    endif()
+
     # Shared GUI components can be reused by the app and its behavior checks.
     add_library(xray_ui STATIC
+        src/app/analysis_controller.cpp src/app/analysis_controller.hpp
+        src/ui/analysis/session.cpp src/ui/analysis/session.hpp
+        src/ui/analysis/profiles_page.cpp src/ui/analysis/profiles_page.hpp
+        src/ui/analysis/metrics_page.cpp src/ui/analysis/metrics_page.hpp
+        src/ui/analysis/rules_page.cpp src/ui/analysis/rules_page.hpp
+        src/ui/analysis/findings_page.cpp src/ui/analysis/findings_page.hpp
+        src/ui/analysis/workspace.cpp src/ui/analysis/workspace.hpp
         src/ui/shared/theme.cpp
         src/ui/shared/theme.hpp
         src/ui/shared/popup_style.hpp
@@ -192,6 +203,13 @@ if(CODE_XRAY_BUILD_APP)
     endif()
 
     if(BUILD_TESTING)
+        find_package(Qt6 CONFIG REQUIRED COMPONENTS Test)
+        add_executable(analysis_ui_tests tests/analysis/ui_tests.cpp src/app/main_window.cpp)
+        set_target_properties(analysis_ui_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(analysis_ui_tests PRIVATE xray_ui xray_code Qt6::Test)
+        add_test(NAME analysis_ui COMMAND analysis_ui_tests)
+        set_tests_properties(analysis_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+
         add_executable(gui_design_tests tests/ui/design_tests.cpp src/app/main_window.cpp)
         target_link_libraries(gui_design_tests PRIVATE xray_ui xray_code)
         add_dependencies(gui_design_tests code-xray)
