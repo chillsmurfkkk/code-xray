@@ -170,4 +170,18 @@ void NavigationPanel::setTheme(Theme theme) {
         : QString::fromUtf8("Увімкнути темну тему"));
 }
 
+void NavigationPanel::setCurrentPage(Section section, int pageIndex) {
+    if (currentSection_ != section) {
+        showSection(section);
+        if (section == Section::review && compareButton_) {
+            compareButton_->setChecked(true);
+        } else if (section == Section::code && codeButton_) {
+            codeButton_->setChecked(true);
+        }
+    }
+    if (pageIndex >= 0 && pageIndex < pagesList_->count()) {
+        pagesList_->setCurrentRow(pageIndex);
+    }
+}
+
 } // namespace xray::ui

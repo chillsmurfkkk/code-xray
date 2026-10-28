@@ -29,6 +29,9 @@ public:
                   const xray::review::ComparisonReport& report);
 
 signals:
+    /// Повернення до таблиці порівняння
+    void backToComparisonRequested();
+
     /// D-H09: запит переходу до історії файла.
     void fileHistoryRequested(const QString& relativePath, const QString& commitOid);
 
@@ -38,6 +41,7 @@ private slots:
     void onFileHistoryRequested();                          // D-H09
 
 private:
+    QPushButton*  backButton_      = nullptr;
     QLabel*       titleLabel_      = nullptr;
     xray::ui::CodeView* beforeCodeView_ = nullptr;  // Перегляд коду «до» (з номерами рядків та синтаксисом)
     xray::ui::CodeView* afterCodeView_  = nullptr;  // Перегляд коду «після» (з номерами рядків та синтаксисом)
