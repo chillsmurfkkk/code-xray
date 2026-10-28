@@ -46,12 +46,22 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     mainLayout->setContentsMargins(16, 16, 16, 16);
     mainLayout->setSpacing(12);
 
+    auto* headerLayout = new QHBoxLayout;
+    backButton_ = new QPushButton(QString::fromUtf8("← Назад"));
+    backButton_->setProperty("role", "primaryAction");
+    backButton_->setMinimumHeight(30);
+    backButton_->setToolTip(QString::fromUtf8("Повернутися до таблиці порівняння"));
+    connect(backButton_, &QPushButton::clicked, this, &ChangeCardPage::backToComparisonRequested);
+    headerLayout->addWidget(backButton_);
+
     titleLabel_ = new QLabel(QString::fromUtf8("Картка зміни"));
     auto titleFont = titleLabel_->font();
     titleFont.setPointSize(titleFont.pointSize() + 4);
     titleFont.setBold(true);
     titleLabel_->setFont(titleFont);
-    mainLayout->addWidget(titleLabel_);
+    headerLayout->addWidget(titleLabel_);
+    headerLayout->addStretch();
+    mainLayout->addLayout(headerLayout);
 
     explanationLabel_ = new QLabel;
     explanationLabel_->setWordWrap(true);

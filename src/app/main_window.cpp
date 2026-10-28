@@ -85,13 +85,18 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         }
     });
 
-    // Зв'язуємо вибір рядка в таблиці порівняння з відкриттям «Картки зміни» [P1]
-    connect(comparisonPage_, &ui::review::ComparisonPage::reviewItemSelected, this, [this](int index) {
+    // Зв'язуємо вибір рядка в таблиці порівняння з відкриттям «Картки зміни» та синхронізацією панелі [P1]
+    connect(comparisonPage_, &ui::review::ComparisonPage::reviewItemSelected, this, [this, navigation](int index) {
         const auto& report = comparisonPage_->currentReport();
         if (index >= 0 && index < static_cast<int>(report.items.size())) {
             changeCardPage_->showItem(report.items[static_cast<std::size_t>(index)], report);
-            contentStack_->setCurrentWidget(changeCardPage_);
+            navigation->setCurrentPage(ui::Section::review, 2);
         }
+    });
+
+    // Кнопка «Назад» на картці зміни повертає до таблиці порівняння
+    connect(changeCardPage_, &ui::review::ChangeCardPage::backToComparisonRequested, this, [navigation]() {
+        navigation->setCurrentPage(ui::Section::review, 0);
     });
 
     connect(

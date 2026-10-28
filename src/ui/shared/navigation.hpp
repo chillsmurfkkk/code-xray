@@ -21,6 +21,7 @@ class NavigationPanel : public QFrame {
 public:
     explicit NavigationPanel(QWidget* parent = nullptr);
     void setTheme(Theme theme);
+    void setCurrentPage(Section section, int pageIndex);
 
 signals:
     void themeToggleRequested();
