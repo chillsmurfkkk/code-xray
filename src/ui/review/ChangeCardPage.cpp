@@ -46,23 +46,12 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     mainLayout->setContentsMargins(16, 16, 16, 16);
     mainLayout->setSpacing(12);
 
-    auto* headerLayout = new QHBoxLayout;
-    backButton_ = new QPushButton(QString::fromUtf8("← Назад до порівняння"));
-    backButton_->setProperty("role", "primaryAction");
-    backButton_->setMinimumHeight(30);
-    backButton_->setVisible(false); // За замовчуванням прихована (при переході зі списку вкладок)
-    backButton_->setToolTip(QString::fromUtf8("Повернутися до таблиці порівняння"));
-    connect(backButton_, &QPushButton::clicked, this, &ChangeCardPage::backToComparisonRequested);
-    headerLayout->addWidget(backButton_);
-
     titleLabel_ = new QLabel(QString::fromUtf8("Картка зміни"));
     auto titleFont = titleLabel_->font();
     titleFont.setPointSize(titleFont.pointSize() + 4);
     titleFont.setBold(true);
     titleLabel_->setFont(titleFont);
-    headerLayout->addWidget(titleLabel_);
-    headerLayout->addStretch();
-    mainLayout->addLayout(headerLayout);
+    mainLayout->addWidget(titleLabel_);
 
     explanationLabel_ = new QLabel;
     explanationLabel_->setWordWrap(true);
@@ -128,17 +117,9 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     explanationLabel_->setText(QString::fromUtf8("Виберіть елемент у таблиці порівняння."));
 }
 
-void ChangeCardPage::setBackButtonVisible(bool visible)
-{
-    if (backButton_) {
-        backButton_->setVisible(visible);
-    }
-}
-
-void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& report, bool fromComparison)
+void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& report)
 {
     currentItem_ = item;
-    setBackButtonVisible(fromComparison);
 
     const bool isDemo = (report.analysisFingerprint == "fp-demo-v1" || report.baseId == "analysis-base-001");
     if (isDemo) {
