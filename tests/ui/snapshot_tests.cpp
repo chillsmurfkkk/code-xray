@@ -4,6 +4,7 @@
 #include "ui/shared/theme.hpp"
 
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QImage>
@@ -58,6 +59,93 @@ QString displayedText(const QByteArray& bytes) {
     text.replace(QChar(0x2029), QLatin1Char('\n'));
     text.replace(QChar(0x2028), QLatin1Char('\n'));
     return text;
+}
+
+void checkEntityFilters(const QString& directory) {
+    using namespace xray;
+    using namespace xray::ui;
+    require(QDir().mkpath(directory + "/filters"), "Cannot create filter fixtures");
+    writeFile(directory + "/filters/alpha.cpp",
+              "struct Widget { int tick() { return 1; } int idle() { return 0; } };\n");
+    writeFile(directory + "/filters/beta.cpp", "int other() { return 2; }\n");
+    code::SourceRequest request;
+    request.root = std::filesystem::path(directory.toStdU16String());
+    request.selection.relativePaths = {"filters/alpha.cpp", "filters/beta.cpp"};
+    auto result = std::async(std::launch::async, [&] {
+        return code::collectAndParse(request, {}, {});
+    }).get();
+    require(std::holds_alternative<code::ParsedSnapshot>(result), "Filter fixtures must parse");
+    auto snapshot = std::make_shared<const code::ParsedSnapshot>(
+        std::get<code::ParsedSnapshot>(std::move(result)));
+
+    StructurePage page;
+    auto* search = page.findChild<QLineEdit*>("entitySearch");
+    auto* kind = page.findChild<QComboBox*>("entityKindFilter");
+    auto* tree = page.findChild<QTreeWidget*>("structureTree");
+    auto* count = page.findChild<QLabel*>("countPill");
+    auto* stack = page.findChild<QStackedWidget*>("structureContent");
+    auto* editor = page.findChild<QPlainTextEdit*>("sourceCode");
+    auto* reset = page.findChild<QPushButton*>("resetEntityFilters");
+    require(search && kind && tree && count && stack && editor && reset, "Missing filter controls");
+    auto* noSource = stack->currentWidget();
+    search->setText("not present");
+    require(stack->currentWidget() == noSource && count->text() == QString::fromUtf8("—"),
+            "Filtering without a source must retain its initial state");
+    search->clear();
+    page.setSnapshot(snapshot);
+    require(count->text() == "6", "The unfiltered tree must count files, types and functions");
+    auto* alpha = findFile(*tree, "filters/alpha.cpp");
+    auto* beta = findFile(*tree, "filters/beta.cpp");
+    auto* type = alpha->child(0);
+    auto* tick = findFunction(type, "Widget::tick");
+    auto* idle = findFunction(type, "Widget::idle");
+    tree->setCurrentItem(idle);
+    require(!editor->toPlainText().isEmpty(), "The filter fixture must support source navigation");
+
+    // Disk changes cannot alter the already parsed tree or its source bytes.
+    writeFile(directory + "/filters/alpha.cpp", "int changed() { return 7; }\n");
+    search->setText("  TICK  ");
+    require(count->text() == "1" && !alpha->isHidden() && !type->isHidden()
+                && !tick->isHidden() && idle->isHidden() && beta->isHidden(),
+            "Search must trim whitespace, ignore case and retain only matches and their ancestors");
+    require(alpha->isExpanded() && type->isExpanded(), "Search must expose nested matches");
+    require(!tree->currentItem() && editor->toPlainText().isEmpty(),
+            "Hiding the current entity must clear its source preview");
+    kind->setCurrentIndex(kind->findData(static_cast<int>(code::EntityKind::function)));
+    tree->setCurrentItem(tick);
+    require(editor->toPlainText().contains("struct Widget"), "Filtering must retain snapshot bytes");
+    applyTheme(*qApp, Theme::light);
+    require(search->text() == "  TICK  " && tree->currentItem() == tick && count->text() == "1",
+            "Changing theme must retain filters and the visible selection");
+    search->clear();
+    require(count->text() == "3" && !idle->isHidden() && !beta->isHidden(),
+            "Function filtering must still visit children of nonmatching types and files");
+    kind->setCurrentIndex(kind->findData(static_cast<int>(code::EntityKind::type)));
+    require(count->text() == "1" && !type->isHidden() && tick->isHidden() && beta->isHidden(),
+            "Type filtering must not expose nonmatching children or sibling files");
+    kind->setCurrentIndex(kind->findData(static_cast<int>(code::EntityKind::file)));
+    require(count->text() == "2" && !alpha->isHidden() && !beta->isHidden() && type->isHidden(),
+            "File filtering must count files and hide their nonmatching children");
+
+    search->setText("no match");
+    require(count->text() == "0" && stack->currentWidget()->objectName() == "noFilterMatches",
+            "No matches must have a distinct empty state");
+    reset->click();
+    require(search->text().isEmpty() && !kind->currentData().isValid()
+                && stack->currentWidget() == tree && count->text() == "6"
+                && tree->topLevelItem(0) == alpha && !idle->isHidden(),
+            "Reset must restore all entities without rebuilding the tree");
+    search->setText("tick");
+    kind->setCurrentIndex(kind->findData(static_cast<int>(code::EntityKind::file)));
+    require(count->text() == "0", "Text and kind criteria must both match the same entity");
+    page.setSnapshot(makeDemoSnapshot());
+    require(count->text() == "0" && stack->currentWidget()->objectName() == "noFilterMatches",
+            "New snapshots must immediately apply the existing filters");
+    page.setSnapshot(std::make_shared<const code::ParsedSnapshot>());
+    require(stack->currentWidget()->objectName() != "noFilterMatches" && count->text() == "0",
+            "An empty snapshot must not be presented as a failed search");
+    page.setSnapshot(nullptr);
+    require(stack->currentWidget() == noSource, "Clearing the snapshot must restore the no-source state");
 }
 } // namespace
 
@@ -267,7 +355,8 @@ int main(int argc, char* argv[]) {
         require(!editor->toPlainText().isEmpty(), "Retained source must remain readable after the caller releases it");
         page.setSnapshot(nullptr);
         require(lifetime.expired(), "Clearing the page must release its old snapshot");
-        std::cout << "Producer-to-GUI snapshots, immutable source, navigation, ranges, themes and empty states: passed\n";
+        checkEntityFilters(directory.path());
+        std::cout << "Producer-to-GUI snapshots, immutable source, navigation, ranges, themes, filters and empty states: passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

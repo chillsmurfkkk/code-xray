@@ -16,6 +16,7 @@ class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QPushButton;
+class QComboBox;
 
 namespace xray::ui {
 
@@ -58,9 +59,21 @@ private:
     QStackedWidget* treeContent_ = nullptr;
     QStackedWidget* codeContent_ = nullptr;
     QWidget* emptyResult_ = nullptr;
+    QWidget* noMatches_ = nullptr;
     QWidget* unavailableSource_ = nullptr;
     QPushButton* openButton_ = nullptr;
     QPushButton* cancelButton_ = nullptr;
+    QLineEdit* searchInput_ = nullptr;
+    QComboBox* kindFilter_ = nullptr;
+
+    void applyFilters();
+
+    bool filterItem(
+        QTreeWidgetItem* item,
+        const QString& query,
+        std::optional<xray::code::EntityKind> kind,
+        std::size_t& matchCount
+    );
 
     // Original LF-delimited source lines mapped to decoded document positions.
     // Qt also treats paragraph separators as blocks, so block numbers alone
@@ -70,7 +83,8 @@ private:
     enum ItemRole {
         UnitIndexRole = Qt::UserRole,
         StartLineRole,
-        EndLineRole
+        EndLineRole,
+        KindRole
     };
 
     void onEntitySelected(QTreeWidgetItem* item);
