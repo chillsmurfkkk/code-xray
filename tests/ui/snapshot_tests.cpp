@@ -18,6 +18,7 @@
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextLayout>
 #include <QTreeWidget>
 
 #include <algorithm>
@@ -225,8 +226,12 @@ int main(int argc, char* argv[]) {
         const auto baselineGutter = tree->viewport()->grab().toImage();
 
         int contentChanges = 0;
-        QObject::connect(editor->document(), &QTextDocument::contentsChanged, &page,
-                         [&] { ++contentChanges; });
+        // Syntax rehighlighting also emits contentsChanged. Count character
+        // edits instead, so theme formatting is distinct from document reloads.
+        QObject::connect(editor->document(), &QTextDocument::contentsChange, &page,
+                         [&](int, int removed, int added) {
+                             if (removed != 0 || added != 0) ++contentChanges;
+                         });
 
         tree->setCurrentItem(first);
         app.processEvents();
@@ -272,6 +277,17 @@ int main(int argc, char* argv[]) {
         app.processEvents();
         require(tree->currentItem() == first && editor->textCursor().selectedText() == "return",
                 "Theme changes must preserve entity and user text selection");
+        const auto keywordColors = syntaxColors(app.palette());
+        const auto functionBlock = editor->document()->findBlock(firstPosition);
+        bool keywordMatchesTheme = false;
+        for (const auto& range : functionBlock.layout()->formats()) {
+            if (range.start == 0 && range.length >= 3
+                && range.format.foreground().color() == keywordColors.keyword) {
+                keywordMatchesTheme = true;
+            }
+        }
+        require(keywordMatchesTheme,
+                "Syntax in the styled page must switch to the application's light palette");
         const auto themedSelections = editor->extraSelections();
         require(!themedSelections.isEmpty()
                 && std::all_of(themedSelections.begin(), themedSelections.end(), [&](const auto& selection) {
