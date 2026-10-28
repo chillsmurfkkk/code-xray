@@ -105,7 +105,7 @@ void ComparisonPage::onCompareRequested()
     setReport(makeDemoComparisonReport(), /*isDemo=*/true);
 }
 
-// D-H02: фільтрація таблиці з фіксацією оригінальних індексів [P1]
+// D-H02: фільтрація таблиці через спільний алгоритм ядра filterReviewItems із збереженням оригінальних індексів [P1, P2]
 void ComparisonPage::onReviewFilterChanged()
 {
     const auto pathText = pathFilterEdit_->text().toStdString();
@@ -118,23 +118,11 @@ void ComparisonPage::onReviewFilterChanged()
 
     currentFilteredRows_.clear();
     for (int i = 0; i < static_cast<int>(currentReport_.items.size()); ++i) {
-        const auto& it = currentReport_.items[static_cast<std::size_t>(i)];
-
-        if (!showUnknown && it.confidence == Confidence::incomplete) continue;
-        if (kindFilter.has_value() && it.kind != *kindFilter) continue;
-
-        if (!pathText.empty()) {
-            bool matchesPath = false;
-            for (const auto& ref : it.sourceRefs) {
-                if (ref.relativePath.find(pathText) != std::string::npos) {
-                    matchesPath = true;
-                    break;
-                }
-            }
-            if (!matchesPath) continue;
+        std::vector<ReviewItem> single = { currentReport_.items[static_cast<std::size_t>(i)] };
+        auto filtered = filterReviewItems(single, /*textFilter=*/"", pathText, kindFilter, showUnknown);
+        if (!filtered.empty()) {
+            currentFilteredRows_.push_back({ filtered.front(), i });
         }
-
-        currentFilteredRows_.push_back({it, i});
     }
 
     populateTable();
@@ -170,6 +158,7 @@ void ComparisonPage::populateTable()
     const QColor removedColor(dark ? "#fb4934" : "#9d0006");
     const QColor changedColor(dark ? "#fe8019" : "#af3a03");
     const QColor unchangedColor(dark ? "#a89984" : "#7c6f64");
+    const QColor unmatchedColor(dark ? "#d3869b" : "#8f3f71");
 
     reviewTable_->setRowCount(static_cast<int>(currentFilteredRows_.size()));
     for (int row = 0; row < static_cast<int>(currentFilteredRows_.size()); ++row) {
@@ -189,6 +178,8 @@ void ComparisonPage::populateTable()
             kindItem->setForeground(changedColor);
         } else if (item.kind == ReviewKind::unchanged) {
             kindItem->setForeground(unchangedColor);
+        } else if (item.kind == ReviewKind::unmatched) {
+            kindItem->setForeground(unmatchedColor);
         }
 
         const auto path = item.sourceRefs.empty() ? "" : item.sourceRefs.front().relativePath;
@@ -207,19 +198,20 @@ void ComparisonPage::populateTable()
 
 void ComparisonPage::updateSummary()
 {
-    int added = 0, removed = 0, changed = 0, unchanged = 0;
+    int added = 0, removed = 0, changed = 0, unchanged = 0, unmatched = 0;
     for (const auto& entry : currentFilteredRows_) {
         switch (entry.item.kind) {
-        case ReviewKind::added: ++added; break;
-        case ReviewKind::removed: ++removed; break;
-        case ReviewKind::changed: ++changed; break;
+        case ReviewKind::added:     ++added;     break;
+        case ReviewKind::removed:   ++removed;   break;
+        case ReviewKind::changed:   ++changed;   break;
         case ReviewKind::unchanged: ++unchanged; break;
-        default: break;
+        case ReviewKind::unmatched: ++unmatched; break;
         }
     }
     const QString prefix = isDemo_ ? QString::fromUtf8("[Демо] ") : "";
-    summaryLabel_->setText(QString::fromUtf8("%1Підсумок:  Додано: %2  •  Видалено: %3  •  Змінено: %4  •  Без змін: %5")
-        .arg(prefix).arg(added).arg(removed).arg(changed).arg(unchanged));
+    summaryLabel_->setText(QString::fromUtf8(
+        "%1Підсумок:  Додано: %2  •  Видалено: %3  •  Змінено: %4  •  Без змін: %5  •  Незіставлено: %6")
+        .arg(prefix).arg(added).arg(removed).arg(changed).arg(unchanged).arg(unmatched));
 }
 
 QString ComparisonPage::kindToString(ReviewKind kind)
