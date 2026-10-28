@@ -139,18 +139,16 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
             if (!snap || !snap->parsed || !snap->parsed->source) continue;
             if (snap->parsed->source->id != sourceId) continue;
             for (const auto& file : snap->parsed->source->files) {
-                // Шлях обов'язково має збігатися з відносним шляхом посилання
+                // Шлях обов'язково має точно збігатися з повним відносним шляхом посилання [P1]
                 bool matches = false;
                 if (relativePath.empty()) {
-                    matches = true;
+                    matches = file.relativePath.empty();
                 } else if (file.relativePath == relativePath) {
                     matches = true;
                 } else {
-                    auto f1 = std::filesystem::path(file.relativePath).generic_string();
-                    auto f2 = std::filesystem::path(relativePath).generic_string();
-                    if (f1 == f2 || f1.ends_with("/" + f2) || f2.ends_with("/" + f1)) {
-                        matches = true;
-                    }
+                    auto f1 = std::filesystem::path(file.relativePath).lexically_normal().generic_string();
+                    auto f2 = std::filesystem::path(relativePath).lexically_normal().generic_string();
+                    matches = (f1 == f2);
                 }
                 if (!matches) continue;
 
