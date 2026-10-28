@@ -95,6 +95,41 @@ void applyTheme(QApplication& application, Theme theme) {
         QPushButton[role="primaryAction"]:focus { border-color: %7; }
         QPushButton[role="primaryAction"]:disabled { background: %2; color: %11; border-color: %4; }
 
+        QComboBox[role="inputField"] {
+            background: %1;
+            color: %5;
+            border: 1px solid %4;
+            border-radius: 8px;
+            padding: 6px 10px;
+        }
+
+        QComboBox[role="inputField"]:hover:enabled {
+            background: %9;
+        }
+
+        QComboBox[role="inputField"]:focus,
+        QComboBox[role="inputField"]:on {
+            border-color: %7;
+        }
+
+        QComboBox[role="inputField"]:disabled {
+            color: %11;
+        }
+
+        QComboBox[role="inputField"] QAbstractItemView {
+            background: %2; color: %5; border: 1px solid %4;
+            selection-background-color: %3; selection-color: %5;
+        }
+
+        QLineEdit[role="inputField"] {
+            background: %1; color: %5; placeholder-text-color: %6;
+            border: 1px solid %4; border-radius: 8px; padding: 6px 10px;
+            selection-background-color: %3; selection-color: %5;
+        }
+        QLineEdit[role="inputField"]:hover:enabled { background: %9; }
+        QLineEdit[role="inputField"]:focus { border-color: %7; }
+        QLineEdit[role="inputField"]:disabled { color: %11; placeholder-text-color: %11; }
+
         QLineEdit#sourcePath {
             background: transparent; color: %5; border: 1px solid transparent;
             border-radius: 6px; padding: 4px; font-weight: 600;

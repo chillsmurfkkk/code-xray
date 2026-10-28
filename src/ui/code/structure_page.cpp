@@ -26,6 +26,7 @@
 #include <QTextFormat>
 #include <QVariant>
 #include <QPushButton>
+#include <QComboBox>
 
 #include <algorithm>
 #include <limits>
@@ -210,6 +211,65 @@ StructurePage::StructurePage(QWidget* parent) : QWidget(parent) {
     treeHeader->addWidget(count);
     treeLayout->addLayout(treeHeader);
 
+    auto* searchInput = new QLineEdit(treePanel);
+    searchInput->setObjectName("entitySearch");
+    searchInput->setProperty("role", "inputField");
+    searchInput->setMinimumHeight(36);
+    searchInput->setMinimumWidth(0);
+    searchInput->setPlaceholderText(
+        QString::fromUtf8("Пошук за назвою")
+    );
+    searchInput->setAccessibleName(
+        QString::fromUtf8("Пошук сутностей")
+    );
+    searchInput->setClearButtonEnabled(true);
+
+    treeLayout->addWidget(searchInput);
+
+    using xray::code::EntityKind;
+
+    auto* kindFilter = new QComboBox(treePanel);
+    kindFilter->setObjectName("entityKindFilter");
+    kindFilter->setProperty("role", "inputField");
+    kindFilter->setAccessibleName(
+        QString::fromUtf8("Вид сутності")
+    );
+    kindFilter->setMinimumHeight(36);
+    kindFilter->setMinimumWidth(0);
+
+    kindFilter->addItem(QString::fromUtf8("Усі сутності"));
+    kindFilter->addItem(
+        QString::fromUtf8("Файли"),
+        static_cast<int>(EntityKind::file)
+    );
+    kindFilter->addItem(
+        QString::fromUtf8("Типи"),
+        static_cast<int>(EntityKind::type)
+    );
+    kindFilter->addItem(
+        QString::fromUtf8("Функції"),
+        static_cast<int>(EntityKind::function)
+    );
+
+    treeLayout->addWidget(kindFilter);
+
+    searchInput_ = searchInput;
+    kindFilter_ = kindFilter;
+
+    connect(
+        searchInput_,
+        &QLineEdit::textChanged,
+        this,
+        &StructurePage::applyFilters
+    );
+
+    connect(
+        kindFilter_,
+        &QComboBox::currentIndexChanged,
+        this,
+        &StructurePage::applyFilters
+    );
+
     auto* treeContent = new QStackedWidget(treePanel);
     treeContent->setObjectName("structureContent");
     tree_ = new QTreeWidget(treeContent);
@@ -230,6 +290,48 @@ StructurePage::StructurePage(QWidget* parent) : QWidget(parent) {
         QString::fromUtf8("Сутностей не знайдено"),
         QString::fromUtf8("У цьому знімку немає доступних файлів, типів або функцій."), treeContent);
     treeContent->addWidget(emptyResult_);
+
+    noMatches_ = emptyState(
+        Symbol::filter,
+        QString::fromUtf8("Збігів немає"),
+        QString::fromUtf8(
+            "Змініть пошук або скиньте фільтри."
+        ),
+        treeContent
+    );
+    noMatches_->setObjectName("noFilterMatches");
+
+    auto* resetButton = new QPushButton(
+        QString::fromUtf8("Скинути фільтри"),
+        noMatches_
+    );
+    resetButton->setObjectName("resetEntityFilters");
+    resetButton->setProperty("role", "primaryAction");
+    resetButton->setMinimumHeight(36);
+
+    auto* stateLayout =
+        static_cast<QVBoxLayout*>(noMatches_->layout());
+
+    stateLayout->insertWidget(
+        stateLayout->count() - 1,
+        resetButton,
+        0,
+        Qt::AlignHCenter
+    );
+
+    treeContent->addWidget(noMatches_);
+
+    connect(resetButton, &QPushButton::clicked, this, [this]() {
+        const QSignalBlocker searchBlocker(searchInput_);
+        const QSignalBlocker kindBlocker(kindFilter_);
+
+        searchInput_->clear();
+        kindFilter_->setCurrentIndex(0);
+
+        applyFilters();
+        searchInput_->setFocus();
+    });
+
     treeContent->setCurrentIndex(0);
     treeLayout->addWidget(treeContent, 1);
 
@@ -316,7 +418,14 @@ std::size_t StructurePage::appendEntity(
     );
 
     item->setData(0, EndLineRole,
-        entity.kind == xray::code::EntityKind::file ? 0u : entity.range.endLine);
+        entity.kind == xray::code::EntityKind::file ? 0u : entity.range.endLine
+    );
+
+    item->setData(
+        0,
+        KindRole,
+        static_cast<int>(entity.kind)
+    );
 
     const auto description = QString::fromStdString(entity.describe());
     item->setText(0, description);
@@ -422,6 +531,8 @@ void StructurePage::setSnapshot(
     tree_->setEnabled(entityCount != 0);
     tree_->expandToDepth(1);
     treeContent_->setCurrentWidget(entityCount == 0 ? emptyResult_ : tree_);
+
+    applyFilters();
 }
 
 void StructurePage::onEntitySelected(QTreeWidgetItem* item) {
@@ -563,6 +674,110 @@ void StructurePage::setLoading(bool loading) {
     cancelButton_->setText(
         QString::fromUtf8("Скасувати")
     );
+}
+
+bool StructurePage::filterItem(
+    QTreeWidgetItem* item,
+    const QString& query,
+    std::optional<xray::code::EntityKind> kind,
+    std::size_t& matchCount
+) {
+    bool hasVisibleChild = false;
+
+    for (int i = 0; i < item->childCount(); ++i) {
+        const bool childVisible = filterItem(
+            item->child(i), query, kind, matchCount
+        );
+
+        hasVisibleChild = hasVisibleChild || childVisible;
+    }
+
+    const bool matchesText =
+        item->text(0).contains(query, Qt::CaseInsensitive);
+
+    const bool matchesKind =
+        !kind
+        || item->data(0, KindRole).toInt()
+            == static_cast<int>(*kind);
+
+    const bool matches = matchesText && matchesKind;
+
+    if (matches) {
+        ++matchCount;
+    }
+
+    const bool visible = matches || hasVisibleChild;
+
+    item->setHidden(!visible);
+
+    if ((!query.isEmpty() || kind.has_value())
+        && hasVisibleChild) {
+        item->setExpanded(true);
+    }
+
+    return visible;
+}
+
+void StructurePage::applyFilters() {
+    if (!snapshot_) {
+        return;
+    }
+
+    const QString query = searchInput_->text().trimmed();
+
+    std::optional<xray::code::EntityKind> kind;
+    const auto filterData = kindFilter_->currentData();
+
+    if (filterData.isValid()) {
+        kind = static_cast<xray::code::EntityKind>(
+            filterData.toInt()
+        );
+    }
+
+    std::size_t matchCount = 0;
+
+    for (int i = 0; i < tree_->topLevelItemCount(); ++i) {
+        filterItem(
+            tree_->topLevelItem(i),
+            query,
+            kind,
+            matchCount
+        );
+    }
+
+    auto* current = tree_->currentItem();
+
+    if (current && current->isHidden()) {
+        tree_->setCurrentItem(nullptr);
+        tree_->clearSelection();
+    }
+
+    count_->setText(
+        QString::number(
+            static_cast<qulonglong>(matchCount)
+        )
+    );
+
+    const bool filtering =
+        !query.isEmpty() || kind.has_value();
+
+    count_->setToolTip(
+        filtering
+            ? QString::fromUtf8(
+                "Кількість збігів без батьківських контейнерів"
+            )
+            : QString::fromUtf8(
+                "Кількість сутностей у дереві"
+            )
+    );
+
+    if (tree_->topLevelItemCount() == 0) {
+        treeContent_->setCurrentWidget(emptyResult_);
+    } else if (matchCount == 0) {
+        treeContent_->setCurrentWidget(noMatches_);
+    } else {
+        treeContent_->setCurrentWidget(tree_);
+    }
 }
 
 } // namespace xray::ui
