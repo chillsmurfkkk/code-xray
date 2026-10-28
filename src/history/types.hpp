@@ -412,18 +412,24 @@ namespace xray::history {
     class LinearHistorySelection : public RevisionSelection {
     private:
         Oid startOid;
-        bool firstParentOnly;
     public:
-        explicit LinearHistorySelection(Oid start, bool firstParent = true)
-            : startOid(std::move(start)), firstParentOnly(firstParent) {
+        // firstParent-only traversal (v1 spec). Throws if start is empty.
+        explicit LinearHistorySelection(Oid start)
+            : startOid(std::move(start)) {
             if (startOid.empty()) {
                 throw std::invalid_argument("LinearHistorySelection: start OID cannot be empty");
             }
         }
 
+        // Traverses the first-parent chain from startOid.
+        // Throws if startOid is not found in commits or if the input is empty.
+        // Throws if a referenced parent OID is missing from commits (truncated graph),
+        // so callers can distinguish truncation from reaching a true root commit.
         [[nodiscard]] std::vector<CommitRecord> select(const std::vector<CommitRecord>& commits) const override {
-            std::vector<CommitRecord> result;
-            if (commits.empty()) return result;
+            if (commits.empty()) {
+                throw std::invalid_argument(
+                    "LinearHistorySelection: commit list is empty, cannot locate start OID: " + startOid);
+            }
 
             std::unordered_map<Oid, const CommitRecord*> commitMap;
             commitMap.reserve(commits.size());
@@ -436,20 +442,26 @@ namespace xray::history {
                 throw std::invalid_argument("LinearHistorySelection: start OID not found: " + startOid);
             }
 
+            std::vector<CommitRecord> result;
             const CommitRecord* current = it->second;
             std::unordered_set<Oid> visited;
 
             while (current != nullptr) {
                 if (!visited.insert(current->oid).second) {
-                    break;
+                    break; // cycle protection
                 }
                 result.push_back(*current);
                 if (current->parentOids.empty()) {
-                    break;
+                    break; // true root commit reached
                 }
                 const Oid& nextOid = current->parentOids.front();
                 auto nextIt = commitMap.find(nextOid);
-                current = (nextIt != commitMap.end()) ? nextIt->second : nullptr;
+                if (nextIt == commitMap.end()) {
+                    // Parent exists in graph but record is missing: truncated input.
+                    throw std::invalid_argument(
+                        "LinearHistorySelection: history is truncated - parent OID not found in commits: " + nextOid);
+                }
+                current = nextIt->second;
             }
 
             return result;
@@ -487,8 +499,14 @@ namespace xray::history {
         std::int64_t netLines = 0;
         std::size_t binaryFilesCount = 0;
         std::size_t modifiedFilesCount = 0;
+        // True when at least one record had nullopt addedLines or deletedLines.
+        // Consumers must not treat the totals as exact when this flag is set.
+        bool hasUnknownLineCounts = false;
     };
 
+    // Aggregates line and file statistics from a ChangeRecord vector.
+    // Sets CodeChurn::hasUnknownLineCounts when any record lacks line data,
+    // so callers can distinguish measured zero-change from unknown statistics.
     [[nodiscard]] inline CodeChurn computeCodeChurn(const std::vector<ChangeRecord>& changes) {
         CodeChurn churn{};
         churn.modifiedFilesCount = changes.size();
@@ -498,15 +516,24 @@ namespace xray::history {
             }
             if (ch.addedLines.has_value()) {
                 churn.totalAddedLines += *ch.addedLines;
+            } else {
+                churn.hasUnknownLineCounts = true;
             }
             if (ch.deletedLines.has_value()) {
                 churn.totalDeletedLines += *ch.deletedLines;
+            } else {
+                churn.hasUnknownLineCounts = true;
             }
         }
         churn.netLines = static_cast<std::int64_t>(churn.totalAddedLines) - static_cast<std::int64_t>(churn.totalDeletedLines);
         return churn;
     }
 
+    // Returns true if ancestorOid is a reachable ancestor of descendantOid
+    // (reflexive: a commit is its own ancestor).
+    // Throws if either OID is empty or not present in commits.
+    // Throws if an intermediate parent OID is referenced but its record is
+    // absent (truncated graph), because ancestry cannot be determined reliably.
     [[nodiscard]] inline bool isAncestor(
         const std::vector<CommitRecord>& commits,
         const Oid& ancestorOid,
@@ -518,18 +545,25 @@ namespace xray::history {
         if (descendantOid.empty()) {
             throw std::invalid_argument("isAncestor: descendant OID cannot be empty");
         }
-        if (ancestorOid == descendantOid) {
-            return true;
-        }
 
+        // Build lookup map first so existence checks are O(1).
         std::unordered_map<Oid, const CommitRecord*> commitMap;
         commitMap.reserve(commits.size());
         for (const auto& c : commits) {
             commitMap[c.oid] = &c;
         }
 
+        // Validate both OIDs exist before any answer is given.
+        if (commitMap.find(ancestorOid) == commitMap.end()) {
+            throw std::invalid_argument("isAncestor: ancestor OID not found in commits: " + ancestorOid);
+        }
         if (commitMap.find(descendantOid) == commitMap.end()) {
             throw std::invalid_argument("isAncestor: descendant OID not found in commits: " + descendantOid);
+        }
+
+        // Reflexive case: valid only after both OIDs are confirmed to exist.
+        if (ancestorOid == descendantOid) {
+            return true;
         }
 
         std::vector<Oid> queue = { descendantOid };
@@ -539,7 +573,12 @@ namespace xray::history {
         while (head < queue.size()) {
             Oid currOid = queue[head++];
             auto it = commitMap.find(currOid);
-            if (it == commitMap.end()) continue;
+            if (it == commitMap.end()) {
+                // A parent OID was enqueued but its record is missing: graph is
+                // truncated and ancestry cannot be determined.
+                throw std::invalid_argument(
+                    "isAncestor: graph is truncated - intermediate commit not found: " + currOid);
+            }
 
             for (const auto& p : it->second->parentOids) {
                 if (p == ancestorOid) {
