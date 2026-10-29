@@ -29,6 +29,15 @@ AncestryPage::AncestryPage(QWidget* parent)
     titleFont.setWeight(QFont::Bold);
     titleLabel->setFont(titleFont);
     headerLayout->addWidget(titleLabel);
+
+    demoBadge_ = new QLabel(QString::fromUtf8("Демо-режим"), this);
+    demoBadge_->setObjectName("ancestryDemoBadge");
+    demoBadge_->setStyleSheet(
+        "background: #d65d0e; color: #fbf1c7; font-weight: bold; "
+        "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
+    );
+    demoBadge_->setToolTip(QString::fromUtf8("Відображаються демонстраційні фікстури ревізій."));
+    headerLayout->addWidget(demoBadge_);
     headerLayout->addStretch();
     mainLayout->addLayout(headerLayout);
 
@@ -56,12 +65,12 @@ AncestryPage::AncestryPage(QWidget* parent)
     checkAncestryBtn_ = new QPushButton(QString::fromUtf8("Перевірити зв'язок"), this);
     checkAncestryBtn_->setObjectName("checkAncestryBtn");
     checkAncestryBtn_->setMinimumHeight(32);
-    checkAncestryBtn_->setStyleSheet("background: #8ec07c; color: #282828; font-weight: bold;");
+    checkAncestryBtn_->setProperty("role", "primaryAction");
     aLayout->addWidget(checkAncestryBtn_, 0, 4);
 
     ancestryResultLabel_ = new QLabel(QString::fromUtf8("Введіть OID комітів для перевірки"), this);
     ancestryResultLabel_->setObjectName("ancestryResultLabel");
-    ancestryResultLabel_->setStyleSheet("background: #32302f; color: #ebdbb2; padding: 8px; border-radius: 6px;");
+    ancestryResultLabel_->setStyleSheet("background: palette(base); color: palette(window-text); border: 1px solid palette(mid); padding: 8px; border-radius: 6px;");
     aLayout->addWidget(ancestryResultLabel_, 1, 0, 1, 5);
 
     mainLayout->addWidget(ancestorBox);
@@ -84,12 +93,13 @@ AncestryPage::AncestryPage(QWidget* parent)
     traceLinearBtn_ = new QPushButton(QString::fromUtf8("Побудувати ланцюг"), this);
     traceLinearBtn_->setObjectName("traceLinearBtn");
     traceLinearBtn_->setMinimumHeight(32);
+    traceLinearBtn_->setProperty("role", "primaryAction");
     lTopLayout->addWidget(traceLinearBtn_);
     lLayout->addLayout(lTopLayout);
 
     linearStatusLabel_ = new QLabel(this);
     linearStatusLabel_->setObjectName("linearStatusLabel");
-    linearStatusLabel_->setStyleSheet("color: #ebdbb2; padding: 2px;");
+    linearStatusLabel_->setStyleSheet("color: palette(window-text); padding: 2px;");
     lLayout->addWidget(linearStatusLabel_);
 
     linearTable_ = new QTableWidget(this);
@@ -102,16 +112,12 @@ AncestryPage::AncestryPage(QWidget* parent)
         QString::fromUtf8("Батьки"),
         QString::fromUtf8("Повідомлення")
     });
-    linearTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    linearTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    linearTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    linearTable_->verticalHeader()->setVisible(false);
+    xray::ui::review::setupReviewTable(linearTable_);
     linearTable_->horizontalHeader()->setStretchLastSection(true);
     linearTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     linearTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     linearTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     linearTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    linearTable_->setItemDelegate(new xray::ui::review::RoundedRowDelegate(linearTable_));
     lLayout->addWidget(linearTable_, 1);
 
     mainLayout->addWidget(linearBox, 1);
@@ -119,41 +125,65 @@ AncestryPage::AncestryPage(QWidget* parent)
     connect(checkAncestryBtn_, &QPushButton::clicked, this, &AncestryPage::onCheckAncestry);
     connect(traceLinearBtn_, &QPushButton::clicked, this, &AncestryPage::onTraceLinearHistory);
 
-    setCommits(makeDemoCommits());
+    setCommits(makeDemoCommits(), true);
 }
 
-void AncestryPage::setCommits(const std::vector<xray::history::CommitRecord>& commits) {
+void AncestryPage::setCommits(const std::vector<xray::history::CommitRecord>& commits, bool isDemo) {
     rawCommits_ = commits;
-    if (!rawCommits_.empty()) {
-        ancestorOidEdit_->setText(QString::fromStdString(rawCommits_.back().oid));
-        descendantOidEdit_->setText(QString::fromStdString(rawCommits_.front().oid));
-        linearStartEdit_->setText(QString::fromStdString(rawCommits_.front().oid));
-        onTraceLinearHistory();
+    isDemo_ = isDemo;
+    if (demoBadge_) {
+        demoBadge_->setVisible(isDemo_);
     }
+    if (rawCommits_.empty()) {
+        ancestorOidEdit_->clear();
+        descendantOidEdit_->clear();
+        linearStartEdit_->clear();
+        ancestryResultLabel_->setStyleSheet("background: palette(base); color: palette(window-text); border: 1px solid palette(mid); padding: 8px; border-radius: 6px;");
+        ancestryResultLabel_->setText(QString::fromUtf8("Історія порожня. Введіть OID комітів для перевірки"));
+        linearStatusLabel_->clear();
+        populateLinearTable({});
+        return;
+    }
+
+    ancestorOidEdit_->setText(QString::fromStdString(rawCommits_.back().oid));
+    descendantOidEdit_->setText(QString::fromStdString(rawCommits_.front().oid));
+    linearStartEdit_->setText(QString::fromStdString(rawCommits_.front().oid));
+    onTraceLinearHistory();
 }
 
 void AncestryPage::onCheckAncestry() {
     QString ancestor = ancestorOidEdit_->text().trimmed();
     QString descendant = descendantOidEdit_->text().trimmed();
+    const bool dark = palette().color(QPalette::Window).lightness() < 128;
 
     try {
         bool result = xray::history::isAncestor(rawCommits_, ancestor.toStdString(), descendant.toStdString());
         if (result) {
-            ancestryResultLabel_->setStyleSheet("background: #b8bb26; color: #282828; font-weight: bold; padding: 8px; border-radius: 6px;");
-            ancestryResultLabel_->setText(QString::fromUtf8("✓ Підтверджено: коміт %1 є предком коміта %2 у графі ревізій").arg(ancestor, descendant));
+            const QString bg = dark ? "#b8bb26" : "#427b58";
+            const QString fg = dark ? "#282828" : "#fbf1c7";
+            ancestryResultLabel_->setStyleSheet(QString("background: %1; color: %2; font-weight: bold; padding: 8px; border-radius: 6px;").arg(bg, fg));
+            ancestryResultLabel_->setText(QString::fromUtf8("✓ Підтверджено: коміт %1 є предком коміта %2 у графі ревізій")
+                .arg(ancestor.toHtmlEscaped(), descendant.toHtmlEscaped()));
         } else {
-            ancestryResultLabel_->setStyleSheet("background: #504945; color: #ebdbb2; padding: 8px; border-radius: 6px;");
-            ancestryResultLabel_->setText(QString::fromUtf8("✗ Відхилено: коміт %1 НЕ є предком коміта %2").arg(ancestor, descendant));
+            ancestryResultLabel_->setStyleSheet("background: palette(alternate-base); color: palette(window-text); border: 1px solid palette(mid); padding: 8px; border-radius: 6px;");
+            ancestryResultLabel_->setText(QString::fromUtf8("✗ Відхилено: коміт %1 НЕ є предком коміта %2")
+                .arg(ancestor.toHtmlEscaped(), descendant.toHtmlEscaped()));
         }
     } catch (const std::exception& e) {
-        ancestryResultLabel_->setStyleSheet("background: #fb4934; color: #282828; font-weight: bold; padding: 8px; border-radius: 6px;");
-        ancestryResultLabel_->setText(QString::fromUtf8("Помилка перевірки предківства: %1").arg(e.what()));
+        const QString bg = dark ? "#fb4934" : "#9d0006";
+        const QString fg = dark ? "#282828" : "#fbf1c7";
+        ancestryResultLabel_->setStyleSheet(QString("background: %1; color: %2; font-weight: bold; padding: 8px; border-radius: 6px;").arg(bg, fg));
+        ancestryResultLabel_->setText(QString::fromUtf8("Помилка перевірки предківства: %1")
+            .arg(QString::fromUtf8(e.what()).toHtmlEscaped()));
     }
 }
 
 void AncestryPage::onTraceLinearHistory() {
     QString start = linearStartEdit_->text().trimmed();
+    const bool dark = palette().color(QPalette::Window).lightness() < 128;
+
     if (start.isEmpty()) {
+        linearStatusLabel_->setStyleSheet("color: palette(window-text); padding: 2px;");
         linearStatusLabel_->setText(QString::fromUtf8("Введіть стартовий OID"));
         populateLinearTable({});
         return;
@@ -163,14 +193,17 @@ void AncestryPage::onTraceLinearHistory() {
         xray::history::LinearHistorySelection linSel(start.toStdString());
         auto chain = linSel.select(rawCommits_);
 
-        linearStatusLabel_->setStyleSheet("color: #b8bb26;");
+        const QString successColor = dark ? "#b8bb26" : "#427b58";
+        linearStatusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 2px;").arg(successColor));
         linearStatusLabel_->setText(QString::fromUtf8("Успішно побудовано first-parent ланцюг: %1 кроків від %2")
-            .arg(chain.size()).arg(start));
+            .arg(QString::number(chain.size()), start.toHtmlEscaped()));
         populateLinearTable(chain);
 
     } catch (const std::exception& e) {
-        linearStatusLabel_->setStyleSheet("color: #fb4934;");
-        linearStatusLabel_->setText(QString::fromUtf8("Помилка побудови ланцюга: %1").arg(e.what()));
+        const QString errColor = dark ? "#fb4934" : "#9d0006";
+        linearStatusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 2px;").arg(errColor));
+        linearStatusLabel_->setText(QString::fromUtf8("Помилка побудови ланцюга: %1")
+            .arg(QString::fromUtf8(e.what()).toHtmlEscaped()));
         populateLinearTable({});
     }
 }

@@ -31,18 +31,18 @@ CommitsPage::CommitsPage(QWidget* parent)
     titleLabel->setFont(titleFont);
     headerLayout->addWidget(titleLabel);
 
-    demoBadge_ = new QLabel(QString::fromUtf8("Демо-режим"));
+    demoBadge_ = new QLabel(QString::fromUtf8("Демо-режим"), this);
     demoBadge_->setObjectName("commitsDemoBadge");
     demoBadge_->setStyleSheet(
-        "background: #d65d0e; color: #ebdbb2; font-weight: bold; "
+        "background: #d65d0e; color: #fbf1c7; font-weight: bold; "
         "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
     );
+    demoBadge_->setToolTip(QString::fromUtf8("Відображаються демонстраційні фікстури ревізій."));
     headerLayout->addWidget(demoBadge_);
     headerLayout->addStretch();
 
     countLabel_ = new QLabel(this);
-    countLabel_->setObjectName("commitsCountLabel");
-    countLabel_->setStyleSheet("color: #a89984; font-size: 12px;");
+    countLabel_->setObjectName("panelCaption");
     headerLayout->addWidget(countLabel_);
 
     mainLayout->addLayout(headerLayout);
@@ -100,23 +100,19 @@ CommitsPage::CommitsPage(QWidget* parent)
         QString::fromUtf8("Батьки"),
         QString::fromUtf8("Повідомлення")
     });
-    commitsTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    commitsTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    commitsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    commitsTable_->verticalHeader()->setVisible(false);
+    xray::ui::review::setupReviewTable(commitsTable_);
     commitsTable_->horizontalHeader()->setStretchLastSection(true);
     commitsTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     commitsTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     commitsTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     commitsTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     commitsTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    commitsTable_->setItemDelegate(new xray::ui::review::RoundedRowDelegate(commitsTable_));
     mainLayout->addWidget(commitsTable_, 1);
 
     // --- Details panel ---
     detailsLabel_ = new QLabel(QString::fromUtf8("Виберіть коміт для перегляду деталей"), this);
     detailsLabel_->setObjectName("commitDetailsLabel");
-    detailsLabel_->setStyleSheet("background: #32302f; color: #ebdbb2; border-radius: 8px; padding: 10px; font-family: monospace;");
+    detailsLabel_->setStyleSheet("background: palette(base); color: palette(text); border: 1px solid palette(mid); border-radius: 8px; padding: 10px; font-family: monospace;");
     detailsLabel_->setWordWrap(true);
     mainLayout->addWidget(detailsLabel_);
 
@@ -127,12 +123,21 @@ CommitsPage::CommitsPage(QWidget* parent)
     connect(sortBtn_, &QPushButton::clicked, this, &CommitsPage::onSortToggled);
     connect(refreshBtn_, &QPushButton::clicked, this, &CommitsPage::onRefreshClicked);
     connect(commitsTable_, &QTableWidget::cellClicked, this, &CommitsPage::onTableRowSelected);
+    connect(commitsTable_, &QTableWidget::currentItemChanged, this, [this](QTableWidgetItem* current, QTableWidgetItem*) {
+        if (current) {
+            onTableRowSelected(current->row(), current->column());
+        }
+    });
 
-    setCommits(makeDemoCommits());
+    setCommits(makeDemoCommits(), true);
 }
 
-void CommitsPage::setCommits(const std::vector<xray::history::CommitRecord>& commits) {
+void CommitsPage::setCommits(const std::vector<xray::history::CommitRecord>& commits, bool isDemo) {
     rawCommits_ = commits;
+    isDemo_ = isDemo;
+    if (demoBadge_) {
+        demoBadge_->setVisible(isDemo_);
+    }
     onSelectionChanged();
 }
 
@@ -218,11 +223,11 @@ void CommitsPage::updateDetails(int rowIndex) {
         "<b>Батьки:</b> %4<br>"
         "<b>Повідомлення:</b> %5"
     ).arg(
-        QString::fromStdString(c.oid),
-        QString::fromStdString(c.authorName),
-        QString::fromStdString(c.authorEmail),
-        parents,
-        QString::fromStdString(c.message)
+        QString::fromStdString(c.oid).toHtmlEscaped(),
+        QString::fromStdString(c.authorName).toHtmlEscaped(),
+        QString::fromStdString(c.authorEmail).toHtmlEscaped(),
+        parents.toHtmlEscaped(),
+        QString::fromStdString(c.message).toHtmlEscaped()
     ));
 }
 
