@@ -14,6 +14,7 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QDateTime>
+#include <QEvent>
 
 namespace xray::ui::history {
 
@@ -169,6 +170,14 @@ HistoryFiltersPage::HistoryFiltersPage(QWidget* parent)
     setCommits(makeDemoCommits(), true);
 }
 
+void HistoryFiltersPage::changeEvent(QEvent* event) {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::StyleChange) {
+        updateBadge(activeFilterCount_);
+        refreshStatusStyle();
+    }
+}
+
 void HistoryFiltersPage::setCommits(const std::vector<xray::history::CommitRecord>& commits, bool isDemo) {
     rawCommits_ = commits;
     isDemo_ = isDemo;
@@ -179,6 +188,7 @@ void HistoryFiltersPage::setCommits(const std::vector<xray::history::CommitRecor
 }
 
 void HistoryFiltersPage::updateBadge(int activeCount) {
+    activeFilterCount_ = activeCount;
     const bool dark = palette().color(QPalette::Window).lightness() < 128;
     if (activeCount > 0) {
         activeFiltersBadge_->setText(QString::fromUtf8("Активно фільтрів: %1").arg(activeCount));
@@ -195,10 +205,22 @@ void HistoryFiltersPage::updateBadge(int activeCount) {
     }
 }
 
+void HistoryFiltersPage::refreshStatusStyle() {
+    const bool dark = palette().color(QPalette::Window).lightness() < 128;
+    if (statusKind_ == StatusKind::Success) {
+        const QString successColor = dark ? "#b8bb26" : "#427b58";
+        statusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 4px;").arg(successColor));
+    } else if (statusKind_ == StatusKind::Error) {
+        const QString errColor = dark ? "#fb4934" : "#9d0006";
+        statusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 4px;").arg(errColor));
+    } else {
+        statusLabel_->setStyleSheet("color: palette(window-text); padding: 4px;");
+    }
+}
+
 void HistoryFiltersPage::onApplyFilters() {
     std::vector<xray::history::CommitRecord> current = rawCommits_;
     int activeCount = 0;
-    const bool dark = palette().color(QPalette::Window).lightness() < 128;
 
     try {
         // Range filter
@@ -235,8 +257,8 @@ void HistoryFiltersPage::onApplyFilters() {
             activeCount++;
         }
 
-        const QString successColor = dark ? "#b8bb26" : "#427b58";
-        statusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 4px;").arg(successColor));
+        statusKind_ = StatusKind::Success;
+        refreshStatusStyle();
         statusLabel_->setText(QString::fromUtf8("Успішно відфільтровано: знайдено %1 з %2 комітів")
             .arg(current.size())
             .arg(rawCommits_.size()));
@@ -245,8 +267,8 @@ void HistoryFiltersPage::onApplyFilters() {
         populateTable(current);
 
     } catch (const std::exception& e) {
-        const QString errColor = dark ? "#fb4934" : "#9d0006";
-        statusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 4px;").arg(errColor));
+        statusKind_ = StatusKind::Error;
+        refreshStatusStyle();
         statusLabel_->setText(QString::fromUtf8("Помилка виконання фільтра: %1").arg(QString::fromUtf8(e.what()).toHtmlEscaped()));
         populateTable({});
     }
@@ -265,7 +287,8 @@ void HistoryFiltersPage::onResetFilters() {
 
     updateBadge(0);
 
-    statusLabel_->setStyleSheet("color: palette(window-text); padding: 4px;");
+    statusKind_ = StatusKind::Neutral;
+    refreshStatusStyle();
     if (rawCommits_.empty()) {
         statusLabel_->setText(QString::fromUtf8("Історія порожня. Немає комітів для відображення."));
     } else {

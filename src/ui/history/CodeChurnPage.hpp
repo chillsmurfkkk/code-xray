@@ -22,6 +22,9 @@ public:
     const xray::history::CodeChurn& currentChurn() const { return currentChurn_; }
     bool isDemo() const { return isDemo_; }
 
+protected:
+    void changeEvent(QEvent* event) override;
+
 private slots:
     void onFilterChanged();
     void onResetFilter();

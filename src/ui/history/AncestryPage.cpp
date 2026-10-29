@@ -11,6 +11,7 @@
 #include <QPushButton>
 #include <QTableWidget>
 #include <QHeaderView>
+#include <QEvent>
 
 namespace xray::ui::history {
 
@@ -128,18 +129,74 @@ AncestryPage::AncestryPage(QWidget* parent)
     setCommits(makeDemoCommits(), true);
 }
 
+void AncestryPage::changeEvent(QEvent* event) {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::StyleChange) {
+        updateAncestryResultStyle();
+        updateLinearStatusStyle();
+    }
+}
+
+void AncestryPage::updateAncestryResultStyle() {
+    const bool dark = palette().color(QPalette::Window).lightness() < 128;
+    switch (ancestryStatusKind_) {
+    case AncestryStatusKind::Neutral:
+        ancestryResultLabel_->setStyleSheet("background: palette(base); color: palette(window-text); border: 1px solid palette(mid); padding: 8px; border-radius: 6px;");
+        break;
+    case AncestryStatusKind::Confirmed: {
+        const QString bg = dark ? "#b8bb26" : "#427b58";
+        const QString fg = dark ? "#282828" : "#fbf1c7";
+        ancestryResultLabel_->setStyleSheet(QString("background: %1; color: %2; font-weight: bold; padding: 8px; border-radius: 6px;").arg(bg, fg));
+        break;
+    }
+    case AncestryStatusKind::Rejected:
+        ancestryResultLabel_->setStyleSheet("background: palette(alternate-base); color: palette(window-text); border: 1px solid palette(mid); padding: 8px; border-radius: 6px;");
+        break;
+    case AncestryStatusKind::Error: {
+        const QString bg = dark ? "#fb4934" : "#9d0006";
+        const QString fg = dark ? "#282828" : "#fbf1c7";
+        ancestryResultLabel_->setStyleSheet(QString("background: %1; color: %2; font-weight: bold; padding: 8px; border-radius: 6px;").arg(bg, fg));
+        break;
+    }
+    }
+}
+
+void AncestryPage::updateLinearStatusStyle() {
+    const bool dark = palette().color(QPalette::Window).lightness() < 128;
+    switch (linearStatusKind_) {
+    case LinearStatusKind::Neutral:
+        linearStatusLabel_->setStyleSheet("color: palette(window-text); padding: 2px;");
+        break;
+    case LinearStatusKind::Success: {
+        const QString successColor = dark ? "#b8bb26" : "#427b58";
+        linearStatusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 2px;").arg(successColor));
+        break;
+    }
+    case LinearStatusKind::Error: {
+        const QString errColor = dark ? "#fb4934" : "#9d0006";
+        linearStatusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 2px;").arg(errColor));
+        break;
+    }
+    }
+}
+
 void AncestryPage::setCommits(const std::vector<xray::history::CommitRecord>& commits, bool isDemo) {
     rawCommits_ = commits;
     isDemo_ = isDemo;
     if (demoBadge_) {
         demoBadge_->setVisible(isDemo_);
     }
+
+    ancestryStatusKind_ = AncestryStatusKind::Neutral;
+    updateAncestryResultStyle();
+
     if (rawCommits_.empty()) {
         ancestorOidEdit_->clear();
         descendantOidEdit_->clear();
         linearStartEdit_->clear();
-        ancestryResultLabel_->setStyleSheet("background: palette(base); color: palette(window-text); border: 1px solid palette(mid); padding: 8px; border-radius: 6px;");
         ancestryResultLabel_->setText(QString::fromUtf8("Історія порожня. Введіть OID комітів для перевірки"));
+        linearStatusKind_ = LinearStatusKind::Neutral;
+        updateLinearStatusStyle();
         linearStatusLabel_->clear();
         populateLinearTable({});
         return;
@@ -148,31 +205,30 @@ void AncestryPage::setCommits(const std::vector<xray::history::CommitRecord>& co
     ancestorOidEdit_->setText(QString::fromStdString(rawCommits_.back().oid));
     descendantOidEdit_->setText(QString::fromStdString(rawCommits_.front().oid));
     linearStartEdit_->setText(QString::fromStdString(rawCommits_.front().oid));
+    ancestryResultLabel_->setText(QString::fromUtf8("Введіть OID комітів для перевірки"));
     onTraceLinearHistory();
 }
 
 void AncestryPage::onCheckAncestry() {
     QString ancestor = ancestorOidEdit_->text().trimmed();
     QString descendant = descendantOidEdit_->text().trimmed();
-    const bool dark = palette().color(QPalette::Window).lightness() < 128;
 
     try {
         bool result = xray::history::isAncestor(rawCommits_, ancestor.toStdString(), descendant.toStdString());
         if (result) {
-            const QString bg = dark ? "#b8bb26" : "#427b58";
-            const QString fg = dark ? "#282828" : "#fbf1c7";
-            ancestryResultLabel_->setStyleSheet(QString("background: %1; color: %2; font-weight: bold; padding: 8px; border-radius: 6px;").arg(bg, fg));
+            ancestryStatusKind_ = AncestryStatusKind::Confirmed;
+            updateAncestryResultStyle();
             ancestryResultLabel_->setText(QString::fromUtf8("✓ Підтверджено: коміт %1 є предком коміта %2 у графі ревізій")
                 .arg(ancestor.toHtmlEscaped(), descendant.toHtmlEscaped()));
         } else {
-            ancestryResultLabel_->setStyleSheet("background: palette(alternate-base); color: palette(window-text); border: 1px solid palette(mid); padding: 8px; border-radius: 6px;");
+            ancestryStatusKind_ = AncestryStatusKind::Rejected;
+            updateAncestryResultStyle();
             ancestryResultLabel_->setText(QString::fromUtf8("✗ Відхилено: коміт %1 НЕ є предком коміта %2")
                 .arg(ancestor.toHtmlEscaped(), descendant.toHtmlEscaped()));
         }
     } catch (const std::exception& e) {
-        const QString bg = dark ? "#fb4934" : "#9d0006";
-        const QString fg = dark ? "#282828" : "#fbf1c7";
-        ancestryResultLabel_->setStyleSheet(QString("background: %1; color: %2; font-weight: bold; padding: 8px; border-radius: 6px;").arg(bg, fg));
+        ancestryStatusKind_ = AncestryStatusKind::Error;
+        updateAncestryResultStyle();
         ancestryResultLabel_->setText(QString::fromUtf8("Помилка перевірки предківства: %1")
             .arg(QString::fromUtf8(e.what()).toHtmlEscaped()));
     }
@@ -180,10 +236,10 @@ void AncestryPage::onCheckAncestry() {
 
 void AncestryPage::onTraceLinearHistory() {
     QString start = linearStartEdit_->text().trimmed();
-    const bool dark = palette().color(QPalette::Window).lightness() < 128;
 
     if (start.isEmpty()) {
-        linearStatusLabel_->setStyleSheet("color: palette(window-text); padding: 2px;");
+        linearStatusKind_ = LinearStatusKind::Neutral;
+        updateLinearStatusStyle();
         linearStatusLabel_->setText(QString::fromUtf8("Введіть стартовий OID"));
         populateLinearTable({});
         return;
@@ -193,15 +249,15 @@ void AncestryPage::onTraceLinearHistory() {
         xray::history::LinearHistorySelection linSel(start.toStdString());
         auto chain = linSel.select(rawCommits_);
 
-        const QString successColor = dark ? "#b8bb26" : "#427b58";
-        linearStatusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 2px;").arg(successColor));
+        linearStatusKind_ = LinearStatusKind::Success;
+        updateLinearStatusStyle();
         linearStatusLabel_->setText(QString::fromUtf8("Успішно побудовано first-parent ланцюг: %1 кроків від %2")
             .arg(QString::number(chain.size()), start.toHtmlEscaped()));
         populateLinearTable(chain);
 
     } catch (const std::exception& e) {
-        const QString errColor = dark ? "#fb4934" : "#9d0006";
-        linearStatusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 2px;").arg(errColor));
+        linearStatusKind_ = LinearStatusKind::Error;
+        updateLinearStatusStyle();
         linearStatusLabel_->setText(QString::fromUtf8("Помилка побудови ланцюга: %1")
             .arg(QString::fromUtf8(e.what()).toHtmlEscaped()));
         populateLinearTable({});

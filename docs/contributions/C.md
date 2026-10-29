@@ -133,9 +133,9 @@
 | Форма в src/ui/history/ | Контроли (objectName) | Кількість |
 |---|---|---:|
 | CommitsPage | commitSearchEdit, commitSelectionCombo, commitLimitSpin, commitSortBtn, commitRefreshBtn, commitsTable | 6 |
-| HistoryFiltersPage | ilterRangeStartEdit, ilterRangeEndEdit, ilterAuthorEdit, ilterAuthorCaseCheck, ilterKeywordEdit, ilterKeywordCaseCheck, ilterMinLengthSpin, ilterOnlyMergesCheck, ilterMinParentsSpin, ilterApplyBtn, ilterResetBtn, ilterResultsTable | 12 |
-| CodeChurnPage | statusFilterCombo, churnPathEdit, churnRecomputeBtn, churnResetBtn, churnChangesTable | 5 |
-| AncestryPage | ncestorOidEdit, descendantOidEdit, checkAncestryBtn, linearStartEdit, 	raceLinearBtn, linearHistoryTable | 6 |
+| HistoryFiltersPage | filterRangeStartEdit, filterRangeEndEdit, filterAuthorEdit, filterAuthorCaseCheck, filterKeywordEdit, filterKeywordCaseCheck, filterMinLengthSpin, filterOnlyMergesCheck, filterMinParentsSpin, filterApplyBtn, filterResetBtn, filterResultsTable | 12 |
+| CodeChurnPage | churnStatusCombo, churnPathEdit, churnRecomputeBtn, churnResetBtn, churnChangesTable | 5 |
+| AncestryPage | ancestorOidEdit, descendantOidEdit, checkAncestryBtn, linearStartEdit, traceLinearBtn, linearHistoryTable | 6 |
 
 Контейнери — чотири таблиці ревізій, фільтрів, змін та лінійного ланцюга.
 

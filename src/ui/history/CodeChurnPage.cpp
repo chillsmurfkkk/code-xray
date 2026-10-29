@@ -12,6 +12,7 @@
 #include <QPushButton>
 #include <QTableWidget>
 #include <QHeaderView>
+#include <QEvent>
 
 namespace xray::ui::history {
 
@@ -144,6 +145,14 @@ CodeChurnPage::CodeChurnPage(QWidget* parent)
     connect(resetBtn_, &QPushButton::clicked, this, &CodeChurnPage::onResetFilter);
 
     setChanges(makeDemoChanges(), true);
+}
+
+void CodeChurnPage::changeEvent(QEvent* event) {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::StyleChange) {
+        updateKpis(displayedChanges_);
+        populateTable(displayedChanges_);
+    }
 }
 
 void CodeChurnPage::setChanges(const std::vector<xray::history::ChangeRecord>& changes, bool isDemo) {
