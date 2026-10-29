@@ -20,15 +20,25 @@ public:
     const std::vector<xray::history::CommitRecord>& commits() const { return rawCommits_; }
     bool isDemo() const { return isDemo_; }
 
+protected:
+    void changeEvent(QEvent* event) override;
+
 private slots:
     void onCheckAncestry();
     void onTraceLinearHistory();
 
 private:
+    enum class AncestryStatusKind { Neutral, Confirmed, Rejected, Error };
+    enum class LinearStatusKind { Neutral, Success, Error };
+
+    void updateAncestryResultStyle();
+    void updateLinearStatusStyle();
     void populateLinearTable(const std::vector<xray::history::CommitRecord>& chain);
 
     std::vector<xray::history::CommitRecord> rawCommits_;
     bool isDemo_ = true;
+    AncestryStatusKind ancestryStatusKind_ = AncestryStatusKind::Neutral;
+    LinearStatusKind linearStatusKind_ = LinearStatusKind::Neutral;
 
     QLabel* demoBadge_ = nullptr;
     QLineEdit* ancestorOidEdit_ = nullptr;

@@ -223,7 +223,7 @@ if(CODE_XRAY_BUILD_APP)
         set_target_properties(history_ui_tests PROPERTIES AUTOMOC ON)
         target_link_libraries(history_ui_tests PRIVATE xray_ui xray_history xray_code Qt6::Test)
         add_test(NAME history_ui COMMAND history_ui_tests)
-        set_tests_properties(history_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+        set_tests_properties(history_ui PROPERTIES TIMEOUT 30)
 
         add_executable(gui_design_tests tests/ui/design_tests.cpp src/app/main_window.cpp)
         target_link_libraries(gui_design_tests PRIVATE xray_ui xray_code)

@@ -22,18 +22,26 @@ public:
     const std::vector<xray::history::CommitRecord>& filteredCommits() const { return filteredCommits_; }
     bool isDemo() const { return isDemo_; }
 
+protected:
+    void changeEvent(QEvent* event) override;
+
 private slots:
     void onApplyFilters();
     void onResetFilters();
     void onTableRowSelected(int row, int col);
 
 private:
+    enum class StatusKind { Neutral, Success, Error };
+
     void populateTable(const std::vector<xray::history::CommitRecord>& list);
     void updateBadge(int activeCount);
+    void refreshStatusStyle();
 
     std::vector<xray::history::CommitRecord> rawCommits_;
     std::vector<xray::history::CommitRecord> filteredCommits_;
     bool isDemo_ = true;
+    StatusKind statusKind_ = StatusKind::Neutral;
+    int activeFilterCount_ = 0;
 
     QLabel* demoBadge_ = nullptr;
     QLineEdit* rangeStartEdit_ = nullptr;
