@@ -189,9 +189,18 @@ if(CODE_XRAY_BUILD_APP)
         src/ui/review/ExportPage.cpp
         src/ui/review/ExportPage.hpp
         src/ui/review/review_table_delegate.hpp
+        src/ui/history/CommitsPage.cpp
+        src/ui/history/CommitsPage.hpp
+        src/ui/history/HistoryFiltersPage.cpp
+        src/ui/history/HistoryFiltersPage.hpp
+        src/ui/history/CodeChurnPage.cpp
+        src/ui/history/CodeChurnPage.hpp
+        src/ui/history/AncestryPage.cpp
+        src/ui/history/AncestryPage.hpp
+        src/ui/history/history_fixtures.hpp
     )
     set_target_properties(xray_ui PROPERTIES AUTOMOC ON)
-    target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common xray_review)
+    target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common xray_history xray_review)
 
     qt_add_executable(code-xray WIN32 src/app/main.cpp src/app/main_window.cpp src/app/main_window.hpp src/app/windows_uia_filter.hpp)
     target_link_libraries(code-xray PRIVATE xray_ui xray_history xray_review)
@@ -209,6 +218,12 @@ if(CODE_XRAY_BUILD_APP)
         target_link_libraries(analysis_ui_tests PRIVATE xray_ui xray_code Qt6::Test)
         add_test(NAME analysis_ui COMMAND analysis_ui_tests)
         set_tests_properties(analysis_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+
+        add_executable(history_ui_tests tests/history/ui_tests.cpp src/app/main_window.cpp)
+        set_target_properties(history_ui_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(history_ui_tests PRIVATE xray_ui xray_history xray_code Qt6::Test)
+        add_test(NAME history_ui COMMAND history_ui_tests)
+        set_tests_properties(history_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
 
         add_executable(gui_design_tests tests/ui/design_tests.cpp src/app/main_window.cpp)
         target_link_libraries(gui_design_tests PRIVATE xray_ui xray_code)

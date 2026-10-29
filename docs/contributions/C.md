@@ -124,3 +124,33 @@
 ## Висновок і межі роботи
 
 ООП-основа та класи модуля повністю реалізовані (13 типів, 29 полів, 27 нетривіальних реалізацій; орієнтир 25 реалізацій виконано). Структурні вимоги, поліморфізм та аналітичні утиліти забезпечені у повному обсязі.
+
+## ЛР №2 — інтеграція форм C (Історія)
+
+**4 форми, 23 власні контроли, 4 контейнери, 12 обробників**.
+Спільна навігація NavigationPanel та перемикання теми окремо до кількості контролів форм не включені.
+
+| Форма в src/ui/history/ | Контроли (objectName) | Кількість |
+|---|---|---:|
+| CommitsPage | commitSearchEdit, commitSelectionCombo, commitLimitSpin, commitSortBtn, commitRefreshBtn, commitsTable | 6 |
+| HistoryFiltersPage | ilterRangeStartEdit, ilterRangeEndEdit, ilterAuthorEdit, ilterAuthorCaseCheck, ilterKeywordEdit, ilterKeywordCaseCheck, ilterMinLengthSpin, ilterOnlyMergesCheck, ilterMinParentsSpin, ilterApplyBtn, ilterResetBtn, ilterResultsTable | 12 |
+| CodeChurnPage | statusFilterCombo, churnPathEdit, churnRecomputeBtn, churnResetBtn, churnChangesTable | 5 |
+| AncestryPage | ncestorOidEdit, descendantOidEdit, checkAncestryBtn, linearStartEdit, 	raceLinearBtn, linearHistoryTable | 6 |
+
+Контейнери — чотири таблиці ревізій, фільтрів, змін та лінійного ланцюга.
+
+| Обробники | Події |
+|---|---|
+| CommitsPage::onSelectionChanged / onSearchChanged | Зміна режиму вибірки (LastN, Periodic) та тексту пошуку. |
+| CommitsPage::onSortToggled / onRefreshClicked | Перемикання хронологічного сортування та оновлення. |
+| CommitsPage::onTableRowSelected | Вибір ревізії та генерація сигналу commitSelected. |
+| HistoryFiltersPage::onApplyFilters | Застосування запитів CommitRange, Author, Keyword, Merge. |
+| HistoryFiltersPage::onResetFilters | Скидання фільтрів та очищення параметрів. |
+| CodeChurnPage::onFilterChanged | Фільтрація списку змін за статусом та шляхом, перерахунок CodeChurn. |
+| CodeChurnPage::onResetFilter | Скидання критеріїв Code Churn до початкового стану. |
+| AncestryPage::onCheckAncestry | Запуск алгоритму isAncestor для перевірки родоводу комітів. |
+| AncestryPage::onTraceLinearHistory | Запуск обходу LinearHistorySelection першого батька. |
+| MainWindow::pageSelected (section=history) | Маршрутизація сторінок розділу Історія через QStackedWidget. |
+
+Перевірка: автоматичні тести history_ui_tests перевіряють роботу всіх 4 сторінок, фільтрацію,
+розрахунок динаміки рядків, перевірку предківства та інтеграцію з MainWindow.
