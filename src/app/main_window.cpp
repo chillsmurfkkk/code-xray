@@ -11,6 +11,11 @@
 #include "ui/review/ExportPage.hpp"
 #include "ui/review/review_fixtures.hpp"
 
+#include "ui/history/CommitsPage.hpp"
+#include "ui/history/HistoryFiltersPage.hpp"
+#include "ui/history/CodeChurnPage.hpp"
+#include "ui/history/AncestryPage.hpp"
+
 #include "code/api.hpp"
 #include "ui/code/demo_snapshot.hpp"
 
@@ -74,6 +79,17 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     contentStack_->addWidget(changeCardPage_);
     contentStack_->addWidget(exportPage_);
 
+    // Сторінки розділу Історія (Модуль C)
+    commitsPage_        = new ui::history::CommitsPage(contentStack_);
+    historyFiltersPage_ = new ui::history::HistoryFiltersPage(contentStack_);
+    codeChurnPage_      = new ui::history::CodeChurnPage(contentStack_);
+    ancestryPage_       = new ui::history::AncestryPage(contentStack_);
+
+    contentStack_->addWidget(commitsPage_);
+    contentStack_->addWidget(historyFiltersPage_);
+    contentStack_->addWidget(codeChurnPage_);
+    contentStack_->addWidget(ancestryPage_);
+
     layout->addWidget(navigation);
     layout->addWidget(contentStack_, 1);
     setCentralWidget(central);
@@ -87,6 +103,14 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         } else if (section == ui::Section::analysis) {
             analysisPages_->setCurrentPage(pageIndex);
             contentStack_->setCurrentWidget(analysisPages_);
+        } else if (section == ui::Section::history) {
+            switch (pageIndex) {
+            case 0: contentStack_->setCurrentWidget(commitsPage_);        break;
+            case 1: contentStack_->setCurrentWidget(historyFiltersPage_); break;
+            case 2: contentStack_->setCurrentWidget(codeChurnPage_);      break;
+            case 3: contentStack_->setCurrentWidget(ancestryPage_);       break;
+            default: break;
+            }
         } else if (section == ui::Section::review) {
             switch (pageIndex) {
             case 0: contentStack_->setCurrentWidget(comparisonPage_); break;

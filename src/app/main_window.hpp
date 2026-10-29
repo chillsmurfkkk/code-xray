@@ -18,6 +18,12 @@ class TrendPage;
 class ChangeCardPage;
 class ExportPage;
 }
+namespace history {
+class CommitsPage;
+class HistoryFiltersPage;
+class CodeChurnPage;
+class AncestryPage;
+}
 }
 
 namespace xray::app {
@@ -47,6 +53,10 @@ private:
     ui::review::TrendPage* trendPage_ = nullptr;
     ui::review::ChangeCardPage* changeCardPage_ = nullptr;
     ui::review::ExportPage* exportPage_ = nullptr;
+    ui::history::CommitsPage* commitsPage_ = nullptr;
+    ui::history::HistoryFiltersPage* historyFiltersPage_ = nullptr;
+    ui::history::CodeChurnPage* codeChurnPage_ = nullptr;
+    ui::history::AncestryPage* ancestryPage_ = nullptr;
 };
 
 } // namespace xray::app

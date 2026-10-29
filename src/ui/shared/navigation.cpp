@@ -53,7 +53,12 @@ NavigationPanel::NavigationPanel(QWidget* parent) : QFrame(parent) {
     analysisButton_->setCheckable(true);
     analysisButton_->setAutoExclusive(true);
     connect(analysisButton_, &QToolButton::clicked, this, [this] { showSection(Section::analysis); });
-    addSection(Symbol::history, QString::fromUtf8("Історія"), false);
+
+    historyButton_ = addSection(Symbol::history, QString::fromUtf8("Історія"), true);
+    historyButton_->setObjectName("historySection");
+    historyButton_->setCheckable(true);
+    historyButton_->setAutoExclusive(true);
+    connect(historyButton_, &QToolButton::clicked, this, [this] { showSection(Section::history); });
 
     compareButton_ = addSection(Symbol::compare, QString::fromUtf8("Порівняння"), true);
     compareButton_->setObjectName("compareSection");
@@ -153,6 +158,14 @@ void NavigationPanel::showSection(Section section) {
         addPage(Symbol::filter, QString::fromUtf8("Правила"), true);
         addPage(Symbol::diagnostics, QString::fromUtf8("Порушення"), true);
         pagesList_->setCurrentRow(1);
+    } else if (section == Section::history) {
+        sectionTitle_->setText(QString::fromUtf8("Історія"));
+        sectionSubtitle_->setText(QString::fromUtf8("Ревізії та аналіз змін"));
+        addPage(Symbol::history, QString::fromUtf8("Журнал комітів"), true);
+        addPage(Symbol::filter, QString::fromUtf8("Фільтри історії"), true);
+        addPage(Symbol::analysis, QString::fromUtf8("Динаміка коду"), true);
+        addPage(Symbol::structure, QString::fromUtf8("Дерево ревізій"), true);
+        pagesList_->setCurrentRow(0);
     } else if (section == Section::review) {
         sectionTitle_->setText(QString::fromUtf8("Порівняння"));
         sectionSubtitle_->setText(QString::fromUtf8("Зміни, тренди та експорт"));
@@ -187,6 +200,8 @@ void NavigationPanel::setCurrentPage(Section section, int pageIndex) {
         showSection(section);
         if (section == Section::analysis && analysisButton_) {
             analysisButton_->setChecked(true);
+        } else if (section == Section::history && historyButton_) {
+            historyButton_->setChecked(true);
         } else if (section == Section::review && compareButton_) {
             compareButton_->setChecked(true);
         } else if (section == Section::code && codeButton_) {
