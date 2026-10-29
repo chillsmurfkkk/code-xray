@@ -17,9 +17,10 @@ class CodeChurnPage : public QWidget {
 public:
     explicit CodeChurnPage(QWidget* parent = nullptr);
 
-    void setChanges(const std::vector<xray::history::ChangeRecord>& changes);
+    void setChanges(const std::vector<xray::history::ChangeRecord>& changes, bool isDemo = true);
     const std::vector<xray::history::ChangeRecord>& changes() const { return rawChanges_; }
     const xray::history::CodeChurn& currentChurn() const { return currentChurn_; }
+    bool isDemo() const { return isDemo_; }
 
 private slots:
     void onFilterChanged();
@@ -33,7 +34,9 @@ private:
     std::vector<xray::history::ChangeRecord> rawChanges_;
     std::vector<xray::history::ChangeRecord> displayedChanges_;
     xray::history::CodeChurn currentChurn_;
+    bool isDemo_ = true;
 
+    QLabel* demoBadge_ = nullptr;
     QLabel* addedLinesLabel_ = nullptr;
     QLabel* deletedLinesLabel_ = nullptr;
     QLabel* netLinesLabel_ = nullptr;

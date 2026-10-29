@@ -18,8 +18,9 @@ class CommitsPage : public QWidget {
 public:
     explicit CommitsPage(QWidget* parent = nullptr);
 
-    void setCommits(const std::vector<xray::history::CommitRecord>& commits);
+    void setCommits(const std::vector<xray::history::CommitRecord>& commits, bool isDemo = true);
     const std::vector<xray::history::CommitRecord>& commits() const { return rawCommits_; }
+    bool isDemo() const { return isDemo_; }
 
 signals:
     void commitSelected(const QString& oid);
@@ -38,6 +39,7 @@ private:
     std::vector<xray::history::CommitRecord> rawCommits_;
     std::vector<xray::history::CommitRecord> displayedCommits_;
     bool sortAscending_ = false;
+    bool isDemo_ = true;
 
     QLabel* demoBadge_ = nullptr;
     QLineEdit* searchEdit_ = nullptr;

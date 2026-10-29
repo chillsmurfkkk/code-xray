@@ -33,10 +33,19 @@ HistoryFiltersPage::HistoryFiltersPage(QWidget* parent)
     titleLabel->setFont(titleFont);
     headerLayout->addWidget(titleLabel);
 
+    demoBadge_ = new QLabel(QString::fromUtf8("Демо-режим"), this);
+    demoBadge_->setObjectName("filterDemoBadge");
+    demoBadge_->setStyleSheet(
+        "background: #d65d0e; color: #fbf1c7; font-weight: bold; "
+        "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
+    );
+    demoBadge_->setToolTip(QString::fromUtf8("Відображаються демонстраційні фікстури ревізій."));
+    headerLayout->addWidget(demoBadge_);
+
     activeFiltersBadge_ = new QLabel(QString::fromUtf8("Фільтри не активні"), this);
     activeFiltersBadge_->setObjectName("activeFiltersBadge");
     activeFiltersBadge_->setStyleSheet(
-        "background: #504945; color: #ebdbb2; font-weight: bold; "
+        "background: palette(mid); color: palette(window-text); font-weight: bold; "
         "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
     );
     headerLayout->addWidget(activeFiltersBadge_);
@@ -115,7 +124,7 @@ HistoryFiltersPage::HistoryFiltersPage(QWidget* parent)
     applyBtn_ = new QPushButton(QString::fromUtf8("Застосувати фільтри"), this);
     applyBtn_->setObjectName("filterApplyBtn");
     applyBtn_->setMinimumHeight(32);
-    applyBtn_->setStyleSheet("background: #8ec07c; color: #282828; font-weight: bold;");
+    applyBtn_->setProperty("role", "primaryAction");
 
     resetBtn_ = new QPushButton(QString::fromUtf8("Скинути фільтри"), this);
     resetBtn_->setObjectName("filterResetBtn");
@@ -131,7 +140,7 @@ HistoryFiltersPage::HistoryFiltersPage(QWidget* parent)
     // Status label
     statusLabel_ = new QLabel(this);
     statusLabel_->setObjectName("filterStatusLabel");
-    statusLabel_->setStyleSheet("color: #ebdbb2; padding: 4px;");
+    statusLabel_->setStyleSheet("color: palette(window-text); padding: 4px;");
     mainLayout->addWidget(statusLabel_);
 
     // Results table
@@ -145,33 +154,51 @@ HistoryFiltersPage::HistoryFiltersPage(QWidget* parent)
         QString::fromUtf8("Батьків OID"),
         QString::fromUtf8("Повідомлення")
     });
-    resultsTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    resultsTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    resultsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    resultsTable_->verticalHeader()->setVisible(false);
+    xray::ui::review::setupReviewTable(resultsTable_);
     resultsTable_->horizontalHeader()->setStretchLastSection(true);
     resultsTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     resultsTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     resultsTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     resultsTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    resultsTable_->setItemDelegate(new xray::ui::review::RoundedRowDelegate(resultsTable_));
     mainLayout->addWidget(resultsTable_, 1);
 
     connect(applyBtn_, &QPushButton::clicked, this, &HistoryFiltersPage::onApplyFilters);
     connect(resetBtn_, &QPushButton::clicked, this, &HistoryFiltersPage::onResetFilters);
     connect(resultsTable_, &QTableWidget::cellClicked, this, &HistoryFiltersPage::onTableRowSelected);
 
-    setCommits(makeDemoCommits());
+    setCommits(makeDemoCommits(), true);
 }
 
-void HistoryFiltersPage::setCommits(const std::vector<xray::history::CommitRecord>& commits) {
+void HistoryFiltersPage::setCommits(const std::vector<xray::history::CommitRecord>& commits, bool isDemo) {
     rawCommits_ = commits;
+    isDemo_ = isDemo;
+    if (demoBadge_) {
+        demoBadge_->setVisible(isDemo_);
+    }
     onResetFilters();
+}
+
+void HistoryFiltersPage::updateBadge(int activeCount) {
+    const bool dark = palette().color(QPalette::Window).lightness() < 128;
+    if (activeCount > 0) {
+        activeFiltersBadge_->setText(QString::fromUtf8("Активно фільтрів: %1").arg(activeCount));
+        const QString bg = dark ? "#b8bb26" : "#427b58";
+        const QString fg = dark ? "#282828" : "#fbf1c7";
+        activeFiltersBadge_->setStyleSheet(QString(
+            "background: %1; color: %2; font-weight: bold; border-radius: 8px; padding: 3px 8px; font-size: 11px;"
+        ).arg(bg, fg));
+    } else {
+        activeFiltersBadge_->setText(QString::fromUtf8("Фільтри не активні"));
+        activeFiltersBadge_->setStyleSheet(
+            "background: palette(mid); color: palette(window-text); font-weight: bold; border-radius: 8px; padding: 3px 8px; font-size: 11px;"
+        );
+    }
 }
 
 void HistoryFiltersPage::onApplyFilters() {
     std::vector<xray::history::CommitRecord> current = rawCommits_;
     int activeCount = 0;
+    const bool dark = palette().color(QPalette::Window).lightness() < 128;
 
     try {
         // Range filter
@@ -208,30 +235,19 @@ void HistoryFiltersPage::onApplyFilters() {
             activeCount++;
         }
 
-        statusLabel_->setStyleSheet("color: #b8bb26; padding: 4px;");
+        const QString successColor = dark ? "#b8bb26" : "#427b58";
+        statusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 4px;").arg(successColor));
         statusLabel_->setText(QString::fromUtf8("Успішно відфільтровано: знайдено %1 з %2 комітів")
             .arg(current.size())
             .arg(rawCommits_.size()));
 
-        if (activeCount > 0) {
-            activeFiltersBadge_->setText(QString::fromUtf8("Активно фільтрів: %1").arg(activeCount));
-            activeFiltersBadge_->setStyleSheet(
-                "background: #b8bb26; color: #282828; font-weight: bold; "
-                "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
-            );
-        } else {
-            activeFiltersBadge_->setText(QString::fromUtf8("Фільтри не активні"));
-            activeFiltersBadge_->setStyleSheet(
-                "background: #504945; color: #ebdbb2; font-weight: bold; "
-                "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
-            );
-        }
-
+        updateBadge(activeCount);
         populateTable(current);
 
     } catch (const std::exception& e) {
-        statusLabel_->setStyleSheet("color: #fb4934; font-weight: bold; padding: 4px;");
-        statusLabel_->setText(QString::fromUtf8("Помилка виконання фільтра: %1").arg(e.what()));
+        const QString errColor = dark ? "#fb4934" : "#9d0006";
+        statusLabel_->setStyleSheet(QString("color: %1; font-weight: bold; padding: 4px;").arg(errColor));
+        statusLabel_->setText(QString::fromUtf8("Помилка виконання фільтра: %1").arg(QString::fromUtf8(e.what()).toHtmlEscaped()));
         populateTable({});
     }
 }
@@ -247,14 +263,14 @@ void HistoryFiltersPage::onResetFilters() {
     onlyMergesCheck_->setChecked(false);
     minParentsSpin_->setValue(2);
 
-    activeFiltersBadge_->setText(QString::fromUtf8("Фільтри не активні"));
-    activeFiltersBadge_->setStyleSheet(
-        "background: #504945; color: #ebdbb2; font-weight: bold; "
-        "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
-    );
+    updateBadge(0);
 
-    statusLabel_->setStyleSheet("color: #ebdbb2; padding: 4px;");
-    statusLabel_->setText(QString::fromUtf8("Фільтри скинуто. Відображаються всі %1 комітів").arg(rawCommits_.size()));
+    statusLabel_->setStyleSheet("color: palette(window-text); padding: 4px;");
+    if (rawCommits_.empty()) {
+        statusLabel_->setText(QString::fromUtf8("Історія порожня. Немає комітів для відображення."));
+    } else {
+        statusLabel_->setText(QString::fromUtf8("Фільтри скинуто. Відображаються всі %1 комітів").arg(rawCommits_.size()));
+    }
 
     populateTable(rawCommits_);
 }

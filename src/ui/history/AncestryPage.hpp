@@ -16,8 +16,9 @@ class AncestryPage : public QWidget {
 public:
     explicit AncestryPage(QWidget* parent = nullptr);
 
-    void setCommits(const std::vector<xray::history::CommitRecord>& commits);
+    void setCommits(const std::vector<xray::history::CommitRecord>& commits, bool isDemo = true);
     const std::vector<xray::history::CommitRecord>& commits() const { return rawCommits_; }
+    bool isDemo() const { return isDemo_; }
 
 private slots:
     void onCheckAncestry();
@@ -27,7 +28,9 @@ private:
     void populateLinearTable(const std::vector<xray::history::CommitRecord>& chain);
 
     std::vector<xray::history::CommitRecord> rawCommits_;
+    bool isDemo_ = true;
 
+    QLabel* demoBadge_ = nullptr;
     QLineEdit* ancestorOidEdit_ = nullptr;
     QLineEdit* descendantOidEdit_ = nullptr;
     QPushButton* checkAncestryBtn_ = nullptr;

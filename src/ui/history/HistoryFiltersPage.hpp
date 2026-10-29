@@ -18,8 +18,9 @@ class HistoryFiltersPage : public QWidget {
 public:
     explicit HistoryFiltersPage(QWidget* parent = nullptr);
 
-    void setCommits(const std::vector<xray::history::CommitRecord>& commits);
+    void setCommits(const std::vector<xray::history::CommitRecord>& commits, bool isDemo = true);
     const std::vector<xray::history::CommitRecord>& filteredCommits() const { return filteredCommits_; }
+    bool isDemo() const { return isDemo_; }
 
 private slots:
     void onApplyFilters();
@@ -28,10 +29,13 @@ private slots:
 
 private:
     void populateTable(const std::vector<xray::history::CommitRecord>& list);
+    void updateBadge(int activeCount);
 
     std::vector<xray::history::CommitRecord> rawCommits_;
     std::vector<xray::history::CommitRecord> filteredCommits_;
+    bool isDemo_ = true;
 
+    QLabel* demoBadge_ = nullptr;
     QLineEdit* rangeStartEdit_ = nullptr;
     QLineEdit* rangeEndEdit_ = nullptr;
     QLineEdit* authorEdit_ = nullptr;

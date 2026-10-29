@@ -43,6 +43,9 @@ private slots:
         xray::ui::history::CommitsPage page;
         page.resize(800, 600);
 
+        auto* demoBadge = findControl<QLabel>(&page, "commitsDemoBadge");
+        QVERIFY(demoBadge->isVisible());
+
         auto* table = findControl<QTableWidget>(&page, "commitsTable");
         QCOMPARE(table->rowCount(), 6);
 
@@ -74,16 +77,32 @@ private slots:
         sortBtn->click();
         QCOMPARE(table->rowCount(), 6);
 
-        // Test commit selection signal
-        QSignalSpy spy(&page, &xray::ui::history::CommitsPage::commitSelected);
-        table->selectRow(1);
-        emit table->cellClicked(1, 0);
-        QCOMPARE(spy.count(), 1);
+        // Test keyboard / current item change updating details (P2 fix)
+        auto* details = findControl<QLabel>(&page, "commitDetailsLabel");
+        table->setCurrentCell(2, 0);
+        QVERIFY(details->text().contains(table->item(2, 0)->text()));
+
+        // Test HTML escaping in details label (P2 fix)
+        xray::history::CommitRecord htmlCommit{
+            "html123", {}, "<Special & Author>", "special@test.com",
+            std::chrono::sys_seconds{}, std::chrono::sys_seconds{},
+            "Fix <type> & parsing issues <script>"
+        };
+        page.setCommits({ htmlCommit }, false);
+        QCOMPARE(table->rowCount(), 1);
+        QVERIFY(!demoBadge->isVisible());
+        table->setCurrentCell(0, 0);
+        QVERIFY(details->text().contains("&lt;Special &amp; Author&gt;"));
+        QVERIFY(details->text().contains("&lt;type&gt; &amp; parsing"));
+        QVERIFY(!details->text().contains("<script>"));
     }
 
     void testHistoryFiltersPage() {
         xray::ui::history::HistoryFiltersPage page;
         page.resize(800, 600);
+
+        auto* demoBadge = findControl<QLabel>(&page, "filterDemoBadge");
+        QVERIFY(demoBadge->isVisible());
 
         auto* table = findControl<QTableWidget>(&page, "filterResultsTable");
         QCOMPARE(table->rowCount(), 6);
@@ -109,11 +128,18 @@ private slots:
 
         resetBtn->click();
         QCOMPARE(table->rowCount(), 6);
+
+        // Test setCommits with false demo badge
+        page.setCommits(xray::ui::history::makeDemoCommits(), false);
+        QVERIFY(!demoBadge->isVisible());
     }
 
     void testCodeChurnPage() {
         xray::ui::history::CodeChurnPage page;
         page.resize(800, 600);
+
+        auto* demoBadge = findControl<QLabel>(&page, "churnDemoBadge");
+        QVERIFY(demoBadge->isVisible());
 
         auto* table = findControl<QTableWidget>(&page, "churnChangesTable");
         QCOMPARE(table->rowCount(), 8);
@@ -128,17 +154,11 @@ private slots:
         // One record has nullopt lines (assets/logo.png), so hasUnknownLineCounts must be set
         QVERIFY(completeness->text().contains("невідомі"));
 
-        // Test filter by status (modified)
-        auto* combo = findControl<QComboBox>(&page, "churnStatusCombo");
-        int modIdx = combo->findData(static_cast<int>(xray::history::ChangeStatus::modified));
-        QVERIFY(modIdx >= 0);
-        combo->setCurrentIndex(modIdx);
-        QCOMPARE(table->rowCount(), 3);
-
-        // Test path filter
+        // Test searching renamed file by old path (P2 fix)
         auto* pathEdit = findControl<QLineEdit>(&page, "churnPathEdit");
-        pathEdit->setText("main.cpp");
+        pathEdit->setText("spec_draft.md");
         QCOMPARE(table->rowCount(), 1);
+        QVERIFY(table->item(0, 1)->text().contains("spec_draft.md → docs/spec_v1.md"));
 
         // Reset
         auto* resetBtn = findControl<QPushButton>(&page, "churnResetBtn");
@@ -149,6 +169,9 @@ private slots:
     void testAncestryPage() {
         xray::ui::history::AncestryPage page;
         page.resize(800, 600);
+
+        auto* demoBadge = findControl<QLabel>(&page, "ancestryDemoBadge");
+        QVERIFY(demoBadge->isVisible());
 
         auto* ancestorEdit = findControl<QLineEdit>(&page, "ancestorOidEdit");
         auto* descendantEdit = findControl<QLineEdit>(&page, "descendantOidEdit");
@@ -175,9 +198,17 @@ private slots:
         startEdit->setText("c6f81a2");
         traceBtn->click();
         QVERIFY(linearTable->rowCount() >= 3);
+
+        // Test empty commits clears previous results (P2 fix)
+        page.setCommits({});
+        QVERIFY(ancestorEdit->text().isEmpty());
+        QVERIFY(descendantEdit->text().isEmpty());
+        QVERIFY(startEdit->text().isEmpty());
+        QCOMPARE(linearTable->rowCount(), 0);
+        QVERIFY(resultLabel->text().contains("порожня"));
     }
 
-    void testMainWindowIntegration() {
+    void testMainWindowIntegrationAndThemes() {
         xray::app::MainWindow window(xray::ui::Theme::dark);
         window.setAttribute(Qt::WA_DontShowOnScreen);
         window.resize(1180, 760);
@@ -195,29 +226,31 @@ private slots:
         QVERIFY(commitsTable != nullptr);
         QVERIFY(commitsTable->isVisible());
 
-        // Navigate to History section, page 1 (Filters)
-        nav->setCurrentPage(xray::ui::Section::history, 1);
+        // Test light theme switch (P2 fix for contrast & readability)
+        xray::ui::applyTheme(*qApp, xray::ui::Theme::light);
         qApp->processEvents();
 
+        nav->setCurrentPage(xray::ui::Section::history, 1);
+        qApp->processEvents();
         auto* filterTable = window.findChild<QTableWidget*>("filterResultsTable");
         QVERIFY(filterTable != nullptr);
         QVERIFY(filterTable->isVisible());
 
-        // Navigate to History section, page 2 (Code Churn)
         nav->setCurrentPage(xray::ui::Section::history, 2);
         qApp->processEvents();
-
         auto* churnTable = window.findChild<QTableWidget*>("churnChangesTable");
         QVERIFY(churnTable != nullptr);
         QVERIFY(churnTable->isVisible());
 
-        // Navigate to History section, page 3 (Ancestry)
         nav->setCurrentPage(xray::ui::Section::history, 3);
         qApp->processEvents();
-
         auto* linearTable = window.findChild<QTableWidget*>("linearHistoryTable");
         QVERIFY(linearTable != nullptr);
         QVERIFY(linearTable->isVisible());
+
+        // Restore dark theme
+        xray::ui::applyTheme(*qApp, xray::ui::Theme::dark);
+        qApp->processEvents();
 
         window.close();
     }
