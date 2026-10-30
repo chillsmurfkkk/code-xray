@@ -55,9 +55,17 @@ if(CODE_XRAY_BUILD_PROFILES)
     target_link_libraries(xray_analysis PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
-add_library(xray_history INTERFACE)
-target_link_libraries(xray_history INTERFACE xray_code)
+option(CODE_XRAY_BUILD_HISTORY "Build libgit2-backed history module" ON)
 
+if(CODE_XRAY_BUILD_HISTORY)
+    find_package(libgit2 CONFIG REQUIRED)
+    add_library(xray_history STATIC src/history/api.cpp)
+    target_link_libraries(xray_history PUBLIC xray_code PRIVATE libgit2::libgit2package)
+    target_compile_definitions(xray_history PUBLIC CODE_XRAY_HAS_HISTORY=1)
+else()
+    add_library(xray_history INTERFACE)
+    target_link_libraries(xray_history INTERFACE xray_code)
+endif()
 add_library(xray_review STATIC
     src/review/compare.cpp
     src/review/trend.cpp
@@ -99,6 +107,13 @@ if(BUILD_TESTING)
     add_executable(history_test tests/history_test.cpp)
     target_link_libraries(history_test PRIVATE xray_history)
     add_test(NAME history_test COMMAND history_test)
+
+    if(CODE_XRAY_BUILD_HISTORY)
+        add_executable(git_backend_tests tests/history/git_backend_tests.cpp)
+        target_link_libraries(git_backend_tests PRIVATE xray_history)
+        add_test(NAME git_backend COMMAND git_backend_tests)
+        set_tests_properties(git_backend PROPERTIES TIMEOUT 30)
+    endif()
 
     add_executable(contract_tests tests/contracts.cpp)
     target_link_libraries(contract_tests PRIVATE xray_history xray_review)
