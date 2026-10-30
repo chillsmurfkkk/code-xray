@@ -154,3 +154,42 @@
 
 Перевірка: автоматичні тести history_ui_tests перевіряють роботу всіх 4 сторінок, фільтрацію,
 розрахунок динаміки рядків, перевірку предківства та інтеграцію з MainWindow.
+
+## ЛР №3 — libgit2 бекенд для модуля History
+
+**Файли:** [`src/history/api.cpp`](../../src/history/api.cpp), [`tests/history/git_backend_tests.cpp`](../../tests/history/git_backend_tests.cpp)
+**CTest-ціль:** `git_backend` (10 тестів, 26 assertions — усі PASSED)
+
+### Реалізовані публічні функції
+
+| Функція | Опис |
+|---|---|
+| `query(spec, request, ctx)` | Відкриває Git-репозиторій, обходить коміти через revwalk (TOPOLOGICAL\|TIME), збирає `CommitRecord` (oid, parentOids, author, email, timestamps, message), формує `ChangeRecord` через diff між деревами батька й коміту, виявляє перейменування (`git_diff_find_similar`), підраховує рядки через `git_patch_line_stats`; підтримує pathspec-фільтр, `parentIndex`, скасування через `ctx.isCancelled()`, прапорець `hasMore`. |
+| `loadSnapshot(spec, oid, selection, ctx)` | Відкриває репозиторій, шукає коміт за OID, обходить дерево коміту через `git_tree_walk`, фільтрує файли за `FileSelection` (extensions, excludedDirectories, relativePaths), зчитує blob-вміст; повертає `code::SourceSnapshot` із `kind=git`, `commitOid` та `contentId`=blob OID. |
+
+### RAII-обгортки (GitHandle\<T, Deleter\>)
+
+~10 спеціалізацій для: `git_repository`, `git_commit`, `git_tree`, `git_diff`, `git_patch`, `git_blob`, `git_revwalk`, `git_object`; `LibGit2Guard` — init/shutdown бібліотеки.
+
+### Обробка помилок
+
+Повертає `xray::Error` (коди `not_found`, `invalid_input`, `read_error`) та `xray::Cancelled` при скасуванні `JobContext`. Жодних виключень у публічному API.
+
+### Зміни у CMakeLists.txt
+
+`xray_history` перетворено з `INTERFACE` на `STATIC` бібліотеку з `src/history/api.cpp`; додано лінкування `libgit2::libgit2package`; опція `CODE_XRAY_BUILD_HISTORY` (ON/OFF); CTest-ціль `git_backend` з таймаутом 30 с.
+
+### Тести (git_backend_tests.cpp)
+
+| Тест | Перевіряє |
+|---|---|
+| `testQueryHeadCommits` | HEAD-коміт: OID=40 chars, author, email, timestamp, message |
+| `testQueryChangesPopulated` | 84 ChangeRecords у 10 комітах |
+| `testQueryWithStartOid` | Обхід від конкретного OID |
+| `testQueryInvalidOidReturnsError` | `xray::Error` для невалідного OID |
+| `testQueryNonExistentRepo` | `xray::Error` для неіснуючого шляху |
+| `testQueryHasMore` | `hasMore=true` при `limit=1` |
+| `testQueryParentOids` | Всі parentOids — 40-символьний hex |
+| `testLoadSnapshot` | 109 файлів у HEAD, `kind=git`, `commitOid`, непорожній вміст |
+| `testLoadSnapshotBadOid` | `xray::Error` для неіснуючого OID |
+| `testLoadSnapshotFileSelectionFiltering` | Лише .md файли при `sel.extensions={".md"}` (знайдено 21) |
