@@ -17,7 +17,7 @@
       "generator": "Visual Studio 17 2022",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/contracts-only",
-      "cacheVariables": { "CODE_XRAY_BUILD_APP": "OFF", "CODE_XRAY_BUILD_PROFILES": "OFF", "CODE_XRAY_BUILD_EXPORT": "OFF", "BUILD_TESTING": "ON" }
+      "cacheVariables": { "CODE_XRAY_BUILD_APP": "OFF", "CODE_XRAY_BUILD_PROFILES": "OFF", "CODE_XRAY_BUILD_EXPORT": "OFF", "CODE_XRAY_BUILD_HISTORY": "OFF", "BUILD_TESTING": "ON" }
     },
     {
       "name": "macos-base",
@@ -53,7 +53,7 @@
       "displayName": "macOS / Clang / Contracts & Tests",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/macos-contracts",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "CMAKE_EXPORT_COMPILE_COMMANDS": "ON", "CODE_XRAY_BUILD_APP": "OFF", "CODE_XRAY_BUILD_PROFILES": "OFF", "CODE_XRAY_BUILD_EXPORT": "OFF", "BUILD_TESTING": "ON" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "CMAKE_EXPORT_COMPILE_COMMANDS": "ON", "CODE_XRAY_BUILD_APP": "OFF", "CODE_XRAY_BUILD_PROFILES": "OFF", "CODE_XRAY_BUILD_EXPORT": "OFF", "CODE_XRAY_BUILD_HISTORY": "OFF", "BUILD_TESTING": "ON" },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
