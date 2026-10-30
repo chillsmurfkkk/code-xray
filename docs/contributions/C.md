@@ -154,3 +154,45 @@
 
 Перевірка: автоматичні тести history_ui_tests перевіряють роботу всіх 4 сторінок, фільтрацію,
 розрахунок динаміки рядків, перевірку предківства та інтеграцію з MainWindow.
+
+## ЛР №3 — libgit2 бекенд для модуля History
+
+**Файли:** [`src/history/api.cpp`](../../src/history/api.cpp), [`tests/history/git_backend_tests.cpp`](../../tests/history/git_backend_tests.cpp)  
+**Ретроспектива та джерела:** [`docs/retrospectives/chillsmurfkkk.md`](../retrospectives/chillsmurfkkk.md)  
+**CTest-ціль:** `git_backend` (8 автономних сценаріїв, 42 assertions — усі PASSED)
+
+### Реалізовані публічні функції
+
+| Функція | Опис та відповідність контракту E0 |
+|---|---|
+| `query(spec, request, ctx)` | Відкриває Git-репозиторій (`git_repository_open` + discover fallback). Revwalk налаштовано суворо на **first-parent** обхід (`git_revwalk_simplify_first_parent` + `GIT_SORT_TOPOLOGICAL \| GIT_SORT_TIME`), що гарантує узгодженість тренду без домішування бічних гілок merge-комітів. Збирає `CommitRecord` (oid, parentOids, author, email, timestamps, message). Diff обчислюється через `git_diff_tree_to_tree` з увімкненим виявленням перейменувань (`git_diff_find_similar`). Статистика рядків підраховується через `git_patch_line_stats`. Pathspec фільтр зберігає валідний життєвий цикл вказівників; коміти без змін фільтрованого шляху не додаються до результату і не витрачають ліміт. Валідація `parentIndex` суворо відхиляє невалідні індекси з `invalid_input`. Підтримує скасування через `ctx.isCancelled()` та прапорець `hasMore`. |
+| `loadSnapshot(spec, oid, selection, ctx)` | Відкриває репозиторій, шукає коміт за OID, обходить дерево коміту через `git_tree_walk`. Звичайна фільтрація за `FileSelection` (extensions, excludedDirectories, relativePaths) не вважається помилкою та зберігає `coverage.completeness == complete`. Для файлів, що підпадають під вибірку: symlink (`GIT_FILEMODE_LINK`) та submodule (`GIT_FILEMODE_COMMIT`) пропускаються з фіксацією діагностики та `partial` coverage. Бінарні файли (`git_blob_is_binary` або вбудовані NUL-байти) пропускаються з діагностикою `unsupported_encoding`. Порожні файли (0 байтів) коректно створюються як валідні `SourceFile`. |
+
+### RAII-обгортки (GitHandle\<T, Deleter\>)
+
+Спеціалізації для: `git_repository`, `git_commit`, `git_tree`, `git_diff`, `git_patch`, `git_blob`, `git_revwalk`, `git_object`; `LibGit2Guard` — безпечний init/shutdown бібліотеки.
+
+### Обробка помилок
+
+Повертає `xray::Error` (коди `not_found`, `invalid_input`, `read_error`, `unsupported_encoding`) та `xray::Cancelled` при скасуванні `JobContext`. Будь-які збої читання дерев, lookup батьків чи diff повертають типізовані помилки, не маскуючись під порожні дерева.
+
+### Зміни у CMakeLists.txt та CMakePresets.json
+
+- `xray_history` є `STATIC` бібліотекою з `src/history/api.cpp` при увімкненому `CODE_XRAY_BUILD_HISTORY`.
+- Для полегшених пресетів без сторонніх бібліотек (`contracts-only`, `macos-contracts`) `CODE_XRAY_BUILD_HISTORY` автоматично встановлюється в `OFF`, що забезпечує безпомилковий configure та proходження контрактних тестів.
+- Додано CTest-ціль `git_backend` з лінкуванням `libgit2::libgit2package` та таймаутом 30 с.
+
+### Автономні тести на ізольованій Git-фікстурі (git_backend_tests.cpp)
+
+Тести не залежать від стану `.git` репозиторію проєкту і використовують програмну фікстуру `TestGitRepo`, створену через libgit2 (root commit, commit 2, feature branch, merge commit з двома батьками, binary commit, empty files):
+
+| Тест | Що перевіряє (42 assertions) |
+|---|---|
+| `testFirstParentTraversal` | Revwalk обходить суворо first-parent ланцюг (`merge -> c2 -> root`); коміт із бічної гілки виключено. |
+| `testRelativePathFiltering` | Запит за шляхом `src/helper.hpp` повертає лише коміт `c2`, де файл було додано; коміти без змін не витрачають ліміт. |
+| `testParentIndexValidation` | Некоректний `parentIndex` відхиляється (`invalid_input` для root з index=1 та merge з index=5); валідні 0 та 1 успішно повертають diff відповідних батьків. |
+| `testSnapshotTextAndEmptyFile` | Фільтрація не обраних розширень не робить знімок partial (`complete`, 0 skipped); порожній файл 0 байтів коректно завантажується як повноцінний `SourceFile`. |
+| `testSnapshotDetectsBinaryFiles` | Бінарний blob пропускається, фіксується діагностика `unsupported_encoding` та шлях файлу, знімок отримує статус `partial`. |
+| `testInvalidInputs` | Неіснуючий шлях репозиторію повертає `not_found`; невалідний OID повертає помилку. |
+| `testCancellation` | Скасування `JobContext` повертає `xray::Cancelled` для `query` та `loadSnapshot`. |
+| `testHasMoreFlag` | Обмеження `limit = 1` повертає рівно 1 коміт і прапорець `hasMore = true`. |
