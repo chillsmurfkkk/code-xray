@@ -3,6 +3,7 @@
 #include "ui/analysis/workspace.hpp"
 #include "ui/code/structure_page.hpp"
 #include "ui/code/source_page.hpp"
+#include "ui/code/file_selection_page.hpp"
 #include "ui/shared/navigation.hpp"
 #include "ui/shared/theme.hpp"
 
@@ -34,6 +35,7 @@
 #include <QStatusBar>
 #include <QThread>
 #include <QStackedWidget>
+#include <QMessageBox>
 
 namespace xray::app {
 
@@ -60,6 +62,9 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
 
     source_ = new ui::SourcePage(contentStack_);
     contentStack_->addWidget(source_);
+
+    fileSelection_ = new ui::FileSelectionPage(contentStack_);
+    contentStack_->addWidget(fileSelection_);
 
     analysisController_ = new AnalysisController(this);
     analysisPages_ = new ui::analysis_pages::Workspace(analysisController_->session(), contentStack_);
@@ -103,6 +108,8 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         if (section == ui::Section::code) {
             if (pageIndex == 0) {
                 contentStack_->setCurrentWidget(source_);
+            } else if (pageIndex == 1) {
+                contentStack_->setCurrentWidget(fileSelection_);
             } else if (pageIndex == 2) { // Структура
                 contentStack_->setCurrentWidget(structure_);
             }
@@ -233,6 +240,16 @@ void MainWindow::loadDirectory(const QString& directory) {
 void MainWindow::loadSource(code::SourceRequest request) {
     if (sourceThread_) return;
 
+    QString selectionError;
+    if (!fileSelection_->applyTo(request.selection, selectionError)) {
+        QMessageBox::warning(
+            this,
+            QString::fromUtf8("Некоректний відбір файлів"),
+            selectionError
+        );
+        return;
+    }
+
     sourceStop_ = std::stop_source{};
     const auto token = sourceStop_.get_token();
     const auto jobId = ++sourceJobId_;
@@ -242,6 +259,7 @@ void MainWindow::loadSource(code::SourceRequest request) {
 
     structure_->setLoading(true);
     source_->setLoading(true);
+    fileSelection_->setEnabled(false);
     statusBar()->showMessage(
         QString::fromUtf8("Збираємо файли та розбираємо код…")
     );
@@ -296,6 +314,7 @@ void MainWindow::loadSource(code::SourceRequest request) {
             sourceThread_ = nullptr;
             structure_->setLoading(false);
             source_->setLoading(false);
+            fileSelection_->setEnabled(true);
             statusBar()->clearMessage();
 
             if (sourceStop_.stop_requested() || std::holds_alternative<Cancelled>(*result)) {
