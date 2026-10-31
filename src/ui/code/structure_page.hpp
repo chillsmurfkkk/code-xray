@@ -33,6 +33,7 @@ public:
     );
 
     void setLoading(bool loading);
+    bool openLocation(const QString& path, int line);
 
     signals:
         void openDirectoryRequested();

@@ -148,7 +148,7 @@ void NavigationPanel::showSection(Section section) {
         addPage(Symbol::source, QString::fromUtf8("Джерело"), true);
         addPage(Symbol::filter, QString::fromUtf8("Відбір файлів"), true);
         addPage(Symbol::structure, QString::fromUtf8("Структура"), true);
-        addPage(Symbol::diagnostics, QString::fromUtf8("Діагностика"), false);
+        addPage(Symbol::diagnostics, QString::fromUtf8("Діагностика"), true);
         pagesList_->setCurrentRow(2);
     } else if (section == Section::analysis) {
         sectionTitle_->setText(QString::fromUtf8("Аналіз"));

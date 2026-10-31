@@ -1,17 +1,20 @@
 #include "app/main_window.hpp"
 #include "ui/code/source_page.hpp"
 #include "ui/code/file_selection_page.hpp"
+#include "ui/code/diagnostics_page.hpp"
 #include "ui/shared/popup_style.hpp"
 #include "ui/shared/theme.hpp"
 
 #include <QApplication>
 #include <QDir>
+#include <QComboBox>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProgressBar>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QScrollBar>
@@ -20,6 +23,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTreeWidget>
+#include <QTableWidget>
 
 #include <functional>
 #include <iostream>
@@ -107,6 +111,32 @@ int main(int argc, char** argv) {
         exclusions->item(0)->setSelected(true);
         child<QPushButton>(filters, "removeExclusion")->click();
         require(exclusions->count() == 0, "Selected exclusions must be removable");
+
+        DiagnosticsPage diagnosticPage;
+        auto sourceSnapshot = std::make_shared<xray::code::SourceSnapshot>();
+        sourceSnapshot->coverage.diagnostics.push_back(
+            {xray::ErrorCode::read_error, "Unreadable", std::string("missing.cpp")});
+        auto parsedSnapshot = std::make_shared<xray::code::ParsedSnapshot>();
+        parsedSnapshot->source = sourceSnapshot;
+        xray::code::ParsedUnit diagnosticUnit;
+        diagnosticUnit.relativePath = "broken.cpp";
+        diagnosticUnit.diagnostics.push_back({"broken.cpp", xray::code::SourceRange{0, 1, 2, 2},
+            {xray::ErrorCode::parse_incomplete, "Syntax", std::string("broken.cpp")}});
+        parsedSnapshot->units.push_back(diagnosticUnit);
+        parsedSnapshot->coverage.diagnostics = sourceSnapshot->coverage.diagnostics;
+        parsedSnapshot->coverage.diagnostics.push_back(diagnosticUnit.diagnostics[0].error);
+        diagnosticPage.setSnapshot(parsedSnapshot, true);
+        auto* diagnosticsTable = child<QTableWidget>(diagnosticPage, "diagnosticsTable");
+        require(diagnosticsTable->rowCount() == 2 && diagnosticsTable->item(0, 1)->text() == QString::fromUtf8("—"),
+            "Source and parse diagnostics must appear once and missing lines must remain unknown");
+        diagnosticsTable->selectRow(0);
+        require(!child<QPushButton>(diagnosticPage, "diagnosticsOpenCode")->isEnabled(),
+            "An unreadable file must not offer code navigation");
+        child<QComboBox>(diagnosticPage, "diagnosticsKindFilter")->setCurrentIndex(1);
+        require(!diagnosticsTable->isRowHidden(0) && diagnosticsTable->isRowHidden(1),
+            "Collection filter must retain only collection diagnostics");
+        diagnosticPage.setSnapshot(nullptr);
+        require(diagnosticsTable->rowCount() == 0, "Clearing the snapshot must clear diagnostics");
 
         SourcePage page;
         auto* scan = child<QPushButton>(page, "sourceScan");
@@ -245,6 +275,56 @@ int main(int argc, char** argv) {
         waitFor([&] { return start->isEnabled(); });
         require(message->text().startsWith(QString::fromUtf8("Частковий результат")),
             "Partial parsing must be explicitly distinguished from full success");
+
+        auto* diagnostics = child<DiagnosticsPage>(window, "diagnosticsPage");
+        auto* diagnosticTable = child<QTableWidget>(*diagnostics, "diagnosticsTable");
+        auto* pathFilter = child<QLineEdit>(*diagnostics, "diagnosticsPathFilter");
+        auto* kindFilter = child<QComboBox>(*diagnostics, "diagnosticsKindFilter");
+        auto* diagnosticStatus = child<QLabel>(*diagnostics, "diagnosticsStatus");
+        auto* openCode = child<QPushButton>(*diagnostics, "diagnosticsOpenCode");
+        require(diagnosticTable->rowCount() > 0, "Broken source must have diagnostics");
+        pathFilter->setText("does-not-match");
+        require(diagnosticTable->isRowHidden(0) && diagnosticStatus->text().contains(QString::fromUtf8("За фільтрами")),
+            "Path filter must show the no matches state");
+        pathFilter->clear();
+        kindFilter->setCurrentIndex(1);
+        require(diagnosticTable->isRowHidden(0), "Collection filter must hide parse diagnostics");
+        kindFilter->setCurrentIndex(2);
+        require(!diagnosticTable->isRowHidden(0), "Parse filter must show parse diagnostics");
+        navigation->setCurrentRow(3);
+        diagnosticTable->selectRow(0);
+        require(openCode->isEnabled(), "A parsed file must be available for navigation");
+        const int diagnosticLine = diagnosticTable->item(0, 1)->text().toInt();
+        openCode->click();
+        auto* codeView = child<QPlainTextEdit>(window, "sourceCode");
+        require(navigation->currentRow() == 2 && codeView->textCursor().blockNumber() + 1 == diagnosticLine,
+            "Diagnostic navigation must open the correct line in the source snapshot");
+        navigation->setCurrentRow(3);
+        auto* diagnosticScroll = diagnosticTable->verticalScrollBar();
+        for (int row = diagnosticTable->rowCount(); row < 60; ++row) {
+            diagnosticTable->insertRow(row);
+            diagnosticTable->setItem(row, 0, new QTableWidgetItem(QString("example-%1.cpp").arg(row)));
+            diagnosticTable->setItem(row, 1, new QTableWidgetItem("1"));
+            diagnosticTable->setItem(row, 2, new QTableWidgetItem("Example"));
+        }
+        app.processEvents();
+        require(diagnosticScroll->maximum() > 0, "Diagnostics scrollbar must scroll overflowing rows");
+        diagnosticScroll->setValue(0);
+        diagnosticScroll->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+        require(diagnosticScroll->value() > 0, "Styled diagnostics scrollbar must remain usable");
+        require(diagnosticScroll->width() <= 12, "Diagnostics scrollbar must use the shared narrow style");
+        for (const auto theme : {Theme::dark, Theme::light}) {
+            applyTheme(app, theme);
+            app.processEvents();
+            require(diagnosticScroll->width() <= 12, "Diagnostics scrollbar style must survive theme changes");
+            if (!output.isEmpty()) require(window.grab().save(output + (theme == Theme::dark
+                ? "/diagnostics-dark.png" : "/diagnostics-light.png")), "Could not render diagnostics");
+        }
+        child<QPushButton>(*diagnostics, "diagnosticsReparse")->click();
+        require(navigation->currentRow() == 0 && !start->isEnabled(),
+            "Reparse must open source progress and start a background scan");
+        waitFor([&] { return start->isEnabled(); });
+        require(diagnosticTable->rowCount() > 0, "Reparse must publish updated diagnostics");
 
         source->setDirectory(root + "/empty");
         start->click();
