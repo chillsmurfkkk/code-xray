@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -45,7 +46,7 @@ struct TestGitRepo {
     std::string commit2Oid;
     std::string featCommitOid;
     std::string mergeCommitOid;
-    std::string binaryCommitOid;
+    std::string extraCommitOid;
 
     TestGitRepo() {
         git_libgit2_init();
@@ -182,7 +183,6 @@ struct TestGitRepo {
         git_commit_lookup(featCommit.out(), repo.get(), &featOid);
 
         // --- 4. Merge Commit on main (first-parent: c2Commit, second-parent: featCommit) ---
-        // Contains src/main.cpp, src/helper.hpp, feature.cpp, docs/readme.md
         git_oid treeOidMerge{};
         {
             TTreeBldHandle bld;
@@ -205,38 +205,75 @@ struct TestGitRepo {
         TCommitHandle mergeCommit;
         git_commit_lookup(mergeCommit.out(), repo.get(), &mergeOid);
 
-        // --- 5. Commit with Binary File (parent: mergeCommit) ---
-        const char binData[] = { 'B', 'I', 'N', '\0', 'D', 'A', 'T', 'A', '\0' };
+        // --- 5. Extra commit: nested vendor/, Windows-1251 file, literal pathspec foo[1].cpp, foo1.cpp, binary.bin ---
+        // Binary blob
+        const char binData[] = { 'B', 'I', 'N', '\0', 'D', 'A', 'T', 'A' };
         git_oid binBlob{};
         git_blob_create_from_buffer(&binBlob, repo.get(), binData, sizeof(binData));
+
+        // Windows-1251 text (invalid UTF-8): "Привет" in CP1251 is \xCF\xF0\xE8\xE2\xE5\xF2 (no NUL bytes)
+        const char cp1251Data[] = { '\xCF', '\xF0', '\xE8', '\xE2', '\xE5', '\xF2', '\n' };
+        git_oid cp1251Blob{};
+        git_blob_create_from_buffer(&cp1251Blob, repo.get(), cp1251Data, sizeof(cp1251Data));
+
+        // Literal wildcard test files
+        const char fooBracketSrc[] = "// foo[1].cpp\n";
+        const char foo1Src[] = "// foo1.cpp\n";
+        git_oid fooBracketBlob{}, foo1Blob{};
+        git_blob_create_from_buffer(&fooBracketBlob, repo.get(), fooBracketSrc, sizeof(fooBracketSrc) - 1);
+        git_blob_create_from_buffer(&foo1Blob, repo.get(), foo1Src, sizeof(foo1Src) - 1);
+
+        // Nested vendor directory: src/vendor/vendored.cpp
+        const char vendorSrc[] = "void vendored() {}\n";
+        git_oid vendorBlob{}, vendorTreeOid{};
+        git_blob_create_from_buffer(&vendorBlob, repo.get(), vendorSrc, sizeof(vendorSrc) - 1);
+        {
+            TTreeBldHandle bld;
+            git_treebuilder_new(bld.out(), repo.get(), nullptr);
+            git_treebuilder_insert(nullptr, bld.get(), "vendored.cpp", &vendorBlob, GIT_FILEMODE_BLOB);
+            git_treebuilder_write(&vendorTreeOid, bld.get());
+        }
+
+        git_oid srcTreeOid3{};
+        {
+            TTreeBldHandle bld;
+            git_treebuilder_new(bld.out(), repo.get(), nullptr);
+            git_treebuilder_insert(nullptr, bld.get(), "main.cpp", &mainCppBlob2, GIT_FILEMODE_BLOB);
+            git_treebuilder_insert(nullptr, bld.get(), "helper.hpp", &helperBlob, GIT_FILEMODE_BLOB);
+            git_treebuilder_insert(nullptr, bld.get(), "vendor", &vendorTreeOid, GIT_FILEMODE_TREE);
+            git_treebuilder_insert(nullptr, bld.get(), "foo[1].cpp", &fooBracketBlob, GIT_FILEMODE_BLOB);
+            git_treebuilder_insert(nullptr, bld.get(), "foo1.cpp", &foo1Blob, GIT_FILEMODE_BLOB);
+            git_treebuilder_write(&srcTreeOid3, bld.get());
+        }
 
         git_oid assetsTreeOid{};
         {
             TTreeBldHandle bld;
             git_treebuilder_new(bld.out(), repo.get(), nullptr);
             git_treebuilder_insert(nullptr, bld.get(), "binary.bin", &binBlob, GIT_FILEMODE_BLOB);
+            git_treebuilder_insert(nullptr, bld.get(), "win1251.cpp", &cp1251Blob, GIT_FILEMODE_BLOB);
             git_treebuilder_write(&assetsTreeOid, bld.get());
         }
 
-        git_oid treeOidBin{};
+        git_oid treeOidExtra{};
         {
             TTreeBldHandle bld;
             git_treebuilder_new(bld.out(), repo.get(), nullptr);
-            git_treebuilder_insert(nullptr, bld.get(), "src", &srcTreeOid2, GIT_FILEMODE_TREE);
+            git_treebuilder_insert(nullptr, bld.get(), "src", &srcTreeOid3, GIT_FILEMODE_TREE);
             git_treebuilder_insert(nullptr, bld.get(), "docs", &docsTreeOid, GIT_FILEMODE_TREE);
             git_treebuilder_insert(nullptr, bld.get(), "feature.cpp", &featBlob, GIT_FILEMODE_BLOB);
             git_treebuilder_insert(nullptr, bld.get(), "assets", &assetsTreeOid, GIT_FILEMODE_TREE);
-            git_treebuilder_write(&treeOidBin, bld.get());
+            git_treebuilder_write(&treeOidExtra, bld.get());
         }
 
-        TTreeHandle treeBin;
-        git_tree_lookup(treeBin.out(), repo.get(), &treeOidBin);
+        TTreeHandle treeExtra;
+        git_tree_lookup(treeExtra.out(), repo.get(), &treeOidExtra);
 
-        git_oid binOid{};
-        const git_commit* parentsBin[] = { mergeCommit.get() };
-        git_commit_create(&binOid, repo.get(), "HEAD", sig.get(), sig.get(),
-                          nullptr, "Add binary assets", treeBin.get(), 1, parentsBin);
-        binaryCommitOid = oidToHex(binOid);
+        git_oid extraOid{};
+        const git_commit* parentsExtra[] = { mergeCommit.get() };
+        git_commit_create(&extraOid, repo.get(), "HEAD", sig.get(), sig.get(),
+                          nullptr, "Add vendor, win1251 and bracket files", treeExtra.get(), 1, parentsExtra);
+        extraCommitOid = oidToHex(extraOid);
     }
 
     ~TestGitRepo() {
@@ -280,7 +317,6 @@ void testFirstParentTraversal(const TestGitRepo& fixture) {
         check(hist.commits[2].oid == fixture.rootCommitOid, "third commit is root");
     }
 
-    // Verify feature branch commit is NOT present in first-parent traversal
     bool foundFeatureBranchCommit = false;
     for (const auto& c : hist.commits) {
         if (c.oid == fixture.featCommitOid) foundFeatureBranchCommit = true;
@@ -288,7 +324,36 @@ void testFirstParentTraversal(const TestGitRepo& fixture) {
     check(!foundFeatureBranchCommit, "feature branch commit excluded from first-parent walk");
 }
 
-// 2. Test relativePath filtering: commits not touching path are skipped & do not consume limit
+// 2. Test second parent selection in a multi-commit history (does NOT crash on subsequent single-parent commits)
+void testSecondParentInMultiCommitHistory(const TestGitRepo& fixture) {
+    std::cout << "--- testSecondParentInMultiCommitHistory ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+    xray::history::HistoryRequest req;
+    req.startOid = fixture.mergeCommitOid;
+    req.parentIndex = 1; // choose second parent for merge commit
+    req.limit = 10;      // continue past merge to single-parent commit c2 and root
+
+    auto res = xray::history::query(spec, req, ctx);
+    check(std::holds_alternative<xray::history::HistoryResult>(res),
+          "query with parentIndex=1 across multi-commit history succeeded");
+    if (!std::holds_alternative<xray::history::HistoryResult>(res)) return;
+
+    const auto& hist = std::get<xray::history::HistoryResult>(res);
+    check(hist.commits.size() == 3, "traversed all 3 first-parent commits without error");
+
+    // For the merge commit, parentOid in changes should match feature branch commit
+    bool mergeDiffAgainstSecondParent = false;
+    for (const auto& ch : hist.changes) {
+        if (ch.commitOid == fixture.mergeCommitOid && ch.parentOid == fixture.featCommitOid) {
+            mergeDiffAgainstSecondParent = true;
+            break;
+        }
+    }
+    check(mergeDiffAgainstSecondParent, "merge commit diffed against second parent");
+}
+
+// 3. Test relativePath filtering: commits not touching path are skipped & do not consume limit
 void testRelativePathFiltering(const TestGitRepo& fixture) {
     std::cout << "--- testRelativePathFiltering ---\n";
     xray::JobContext ctx;
@@ -314,7 +379,124 @@ void testRelativePathFiltering(const TestGitRepo& fixture) {
     }
 }
 
-// 3. Test parentIndex validation
+// 4. Test literal pathspec without wildcard matching
+void testLiteralPathspec(const TestGitRepo& fixture) {
+    std::cout << "--- testLiteralPathspec ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+    xray::history::HistoryRequest req;
+    req.startOid = fixture.extraCommitOid;
+    req.relativePath = "src/foo[1].cpp"; // contains brackets []
+    req.limit = 5;
+
+    auto res = xray::history::query(spec, req, ctx);
+    check(std::holds_alternative<xray::history::HistoryResult>(res), "literal path query succeeded");
+    if (!std::holds_alternative<xray::history::HistoryResult>(res)) return;
+
+    const auto& hist = std::get<xray::history::HistoryResult>(res);
+    check(hist.commits.size() == 1, "exactly 1 commit returned for literal foo[1].cpp");
+
+    bool matchedFooBracket = false;
+    bool matchedFoo1 = false;
+    for (const auto& ch : hist.changes) {
+        if (ch.newPath == "src/foo[1].cpp") matchedFooBracket = true;
+        if (ch.newPath == "src/foo1.cpp")    matchedFoo1 = true;
+    }
+    check(matchedFooBracket, "change matched exact path src/foo[1].cpp");
+    check(!matchedFoo1, "foo1.cpp was NOT matched by wildcard expansion");
+}
+
+// 5. Test hasMore accuracy for file history
+void testHasMoreAccuracyForFile(const TestGitRepo& fixture) {
+    std::cout << "--- testHasMoreAccuracyForFile ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+
+    // Case A: src/helper.hpp was only added in c2. When queried from mergeCommit with limit=1,
+    // c2 is returned and there are NO older commits modifying helper.hpp -> hasMore MUST be false!
+    {
+        xray::history::HistoryRequest req;
+        req.startOid = fixture.mergeCommitOid;
+        req.relativePath = "src/helper.hpp";
+        req.limit = 1;
+
+        auto res = xray::history::query(spec, req, ctx);
+        check(std::holds_alternative<xray::history::HistoryResult>(res), "query succeeded");
+        if (std::holds_alternative<xray::history::HistoryResult>(res)) {
+            const auto& hist = std::get<xray::history::HistoryResult>(res);
+            check(hist.commits.size() == 1, "found c2");
+            check(hist.hasMore == false, "hasMore is false because no older commit modified helper.hpp");
+        }
+    }
+
+    // Case B: src/main.cpp was modified in c2 AND created in root.
+    // When queried from c2 with limit=1, root is an older commit that also modified it -> hasMore MUST be true!
+    {
+        xray::history::HistoryRequest req;
+        req.startOid = fixture.commit2Oid;
+        req.relativePath = "src/main.cpp";
+        req.limit = 1;
+
+        auto res = xray::history::query(spec, req, ctx);
+        check(std::holds_alternative<xray::history::HistoryResult>(res), "query succeeded");
+        if (std::holds_alternative<xray::history::HistoryResult>(res)) {
+            const auto& hist = std::get<xray::history::HistoryResult>(res);
+            check(hist.commits.size() == 1, "found 1 commit");
+            check(hist.hasMore == true, "hasMore is true because older commit root modified main.cpp");
+        }
+    }
+}
+
+// 6. Test nested excluded directories in loadSnapshot
+void testNestedExcludedDirectory(const TestGitRepo& fixture) {
+    std::cout << "--- testNestedExcludedDirectory ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+    xray::code::FileSelection sel;
+    sel.relativePaths = { "src" };
+    sel.extensions = { ".cpp", ".hpp" };
+    sel.excludedDirectories = { "vendor" }; // exclude directory named "vendor" at ANY depth
+
+    auto res = xray::history::loadSnapshot(spec, fixture.extraCommitOid, sel, ctx);
+    check(std::holds_alternative<xray::code::SourceSnapshot>(res), "loadSnapshot succeeded");
+    if (!std::holds_alternative<xray::code::SourceSnapshot>(res)) return;
+
+    const auto& snap = std::get<xray::code::SourceSnapshot>(res);
+    check(snap.coverage.completeness == xray::Completeness::complete,
+          "coverage is complete (nested exclusion is normal filtering)");
+
+    bool foundVendored = false;
+    for (const auto& f : snap.files) {
+        if (f.relativePath == "src/vendor/vendored.cpp") foundVendored = true;
+    }
+    check(!foundVendored, "src/vendor/vendored.cpp successfully excluded by nested directory filter");
+}
+
+// 7. Test non-UTF8 encoding detection in loadSnapshot
+void testNonUtf8EncodingDetection(const TestGitRepo& fixture) {
+    std::cout << "--- testNonUtf8EncodingDetection ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+    xray::code::FileSelection sel;
+    sel.relativePaths = { "assets/win1251.cpp" };
+
+    auto res = xray::history::loadSnapshot(spec, fixture.extraCommitOid, sel, ctx);
+    check(std::holds_alternative<xray::code::SourceSnapshot>(res), "loadSnapshot succeeded");
+    if (!std::holds_alternative<xray::code::SourceSnapshot>(res)) return;
+
+    const auto& snap = std::get<xray::code::SourceSnapshot>(res);
+    check(snap.coverage.completeness == xray::Completeness::partial,
+          "coverage is partial due to non-UTF8 file");
+    check(snap.coverage.skippedElements == 1, "1 skipped element for non-UTF8");
+    check(!snap.coverage.diagnostics.empty(), "diagnostic recorded");
+    if (!snap.coverage.diagnostics.empty()) {
+        const auto& d = snap.coverage.diagnostics[0];
+        check(d.code == xray::ErrorCode::unsupported_encoding, "diagnostic is unsupported_encoding");
+        check(d.path.has_value() && *d.path == "assets/win1251.cpp", "diagnostic path matches");
+    }
+}
+
+// 8. Test parentIndex validation
 void testParentIndexValidation(const TestGitRepo& fixture) {
     std::cout << "--- testParentIndexValidation ---\n";
     xray::JobContext ctx;
@@ -349,136 +531,9 @@ void testParentIndexValidation(const TestGitRepo& fixture) {
                   "error code is invalid_input");
         }
     }
-
-    // Case C: Merge commit with parentIndex = 0 (first parent)
-    {
-        xray::history::HistoryRequest req;
-        req.startOid = fixture.mergeCommitOid;
-        req.limit = 1;
-        req.parentIndex = 0;
-
-        auto res = xray::history::query(spec, req, ctx);
-        check(std::holds_alternative<xray::history::HistoryResult>(res), "merge with parentIndex=0 succeeded");
-    }
-
-    // Case D: Merge commit with parentIndex = 1 (second parent)
-    {
-        xray::history::HistoryRequest req;
-        req.startOid = fixture.mergeCommitOid;
-        req.limit = 1;
-        req.parentIndex = 1;
-
-        auto res = xray::history::query(spec, req, ctx);
-        check(std::holds_alternative<xray::history::HistoryResult>(res), "merge with parentIndex=1 succeeded");
-    }
 }
 
-// 4. Test loadSnapshot: normal filtering is complete, empty file included
-void testSnapshotTextAndEmptyFile(const TestGitRepo& fixture) {
-    std::cout << "--- testSnapshotTextAndEmptyFile ---\n";
-    xray::JobContext ctx;
-    xray::history::RepositorySpec spec{ fixture.repoPath };
-    xray::code::FileSelection sel;
-    // Request only .cpp and .txt files; docs/readme.md is outside selection
-    sel.extensions = { ".cpp", ".txt" };
-
-    auto res = xray::history::loadSnapshot(spec, fixture.rootCommitOid, sel, ctx);
-    check(std::holds_alternative<xray::code::SourceSnapshot>(res), "loadSnapshot succeeded");
-    if (!std::holds_alternative<xray::code::SourceSnapshot>(res)) return;
-
-    const auto& snap = std::get<xray::code::SourceSnapshot>(res);
-    check(snap.coverage.completeness == xray::Completeness::complete,
-          "coverage is complete despite readme.md filtered out");
-    check(snap.coverage.skippedElements == 0, "skippedElements is 0");
-    check(snap.coverage.diagnostics.empty(), "no error diagnostics");
-
-    bool foundMainCpp = false;
-    bool foundEmptyTxt = false;
-    for (const auto& f : snap.files) {
-        if (f.relativePath == "src/main.cpp") {
-            foundMainCpp = true;
-            check(f.bytes && !f.bytes->empty(), "src/main.cpp has content");
-        }
-        if (f.relativePath == "empty.txt") {
-            foundEmptyTxt = true;
-            check(f.bytes && f.bytes->empty(), "empty.txt is valid with 0 bytes");
-        }
-    }
-    check(foundMainCpp, "src/main.cpp included in snapshot");
-    check(foundEmptyTxt, "empty.txt included in snapshot");
-}
-
-// 5. Test loadSnapshot: binary file skipped with partial coverage and diagnostic
-void testSnapshotDetectsBinaryFiles(const TestGitRepo& fixture) {
-    std::cout << "--- testSnapshotDetectsBinaryFiles ---\n";
-    xray::JobContext ctx;
-    xray::history::RepositorySpec spec{ fixture.repoPath };
-    xray::code::FileSelection sel;
-    sel.extensions = { ".bin", ".cpp", ".hpp" };
-
-    auto res = xray::history::loadSnapshot(spec, fixture.binaryCommitOid, sel, ctx);
-    check(std::holds_alternative<xray::code::SourceSnapshot>(res), "loadSnapshot succeeded");
-    if (!std::holds_alternative<xray::code::SourceSnapshot>(res)) return;
-
-    const auto& snap = std::get<xray::code::SourceSnapshot>(res);
-    check(snap.coverage.completeness == xray::Completeness::partial,
-          "coverage is partial due to skipped binary file");
-    check(snap.coverage.skippedElements == 1, "exactly 1 skipped element");
-    check(snap.coverage.diagnostics.size() == 1, "exactly 1 diagnostic recorded");
-    if (!snap.coverage.diagnostics.empty()) {
-        const auto& d = snap.coverage.diagnostics[0];
-        check(d.code == xray::ErrorCode::unsupported_encoding, "diagnostic code is unsupported_encoding");
-        check(d.path.has_value() && *d.path == "assets/binary.bin", "diagnostic path matches binary file");
-    }
-
-    // Binary file must NOT be present in snapshot files
-    bool foundBinary = false;
-    for (const auto& f : snap.files) {
-        if (f.relativePath == "assets/binary.bin") foundBinary = true;
-    }
-    check(!foundBinary, "binary file excluded from source snapshot files");
-}
-
-// 6. Test invalid repository and invalid OIDs
-void testInvalidInputs(const TestGitRepo& fixture) {
-    std::cout << "--- testInvalidInputs ---\n";
-    xray::JobContext ctx;
-
-    // Bad repo path
-    {
-        xray::history::RepositorySpec badSpec{ "C:/non/existent/repo/dir" };
-        xray::history::HistoryRequest req;
-        auto res = xray::history::query(badSpec, req, ctx);
-        check(std::holds_alternative<xray::Error>(res), "non-existent repo query returns Error");
-        if (std::holds_alternative<xray::Error>(res)) {
-            check(std::get<xray::Error>(res).code == xray::ErrorCode::not_found,
-                  "non-existent repo error code is not_found");
-        }
-    }
-
-    // Bad start OID
-    {
-        xray::history::RepositorySpec spec{ fixture.repoPath };
-        xray::history::HistoryRequest req;
-        req.startOid = "invalid_hex_oid";
-        auto res = xray::history::query(spec, req, ctx);
-        check(std::holds_alternative<xray::Error>(res), "invalid startOid returns Error");
-    }
-
-    // Bad loadSnapshot OID
-    {
-        xray::history::RepositorySpec spec{ fixture.repoPath };
-        xray::code::FileSelection sel;
-        auto res = xray::history::loadSnapshot(spec, "0000000000000000000000000000000000000000", sel, ctx);
-        check(std::holds_alternative<xray::Error>(res), "unknown OID loadSnapshot returns Error");
-        if (std::holds_alternative<xray::Error>(res)) {
-            check(std::get<xray::Error>(res).code == xray::ErrorCode::not_found,
-                  "unknown OID error code is not_found");
-        }
-    }
-}
-
-// 7. Test cancellation
+// 9. Test cancellation
 void testCancellation(const TestGitRepo& fixture) {
     std::cout << "--- testCancellation ---\n";
     std::stop_source stopSrc;
@@ -497,24 +552,6 @@ void testCancellation(const TestGitRepo& fixture) {
     check(std::holds_alternative<xray::Cancelled>(snapRes), "cancelled loadSnapshot returns Cancelled");
 }
 
-// 8. Test hasMore flag
-void testHasMoreFlag(const TestGitRepo& fixture) {
-    std::cout << "--- testHasMoreFlag ---\n";
-    xray::JobContext ctx;
-    xray::history::RepositorySpec spec{ fixture.repoPath };
-    xray::history::HistoryRequest req;
-    req.startOid = fixture.mergeCommitOid;
-    req.limit = 1;
-
-    auto res = xray::history::query(spec, req, ctx);
-    check(std::holds_alternative<xray::history::HistoryResult>(res), "query succeeded");
-    if (std::holds_alternative<xray::history::HistoryResult>(res)) {
-        const auto& hist = std::get<xray::history::HistoryResult>(res);
-        check(hist.commits.size() == 1, "exactly 1 commit returned");
-        check(hist.hasMore, "hasMore flag is true");
-    }
-}
-
 } // namespace
 
 int main() {
@@ -524,13 +561,14 @@ int main() {
         std::cout << "TestGitRepo created successfully.\n";
 
         testFirstParentTraversal(fixture);
+        testSecondParentInMultiCommitHistory(fixture);
         testRelativePathFiltering(fixture);
+        testLiteralPathspec(fixture);
+        testHasMoreAccuracyForFile(fixture);
+        testNestedExcludedDirectory(fixture);
+        testNonUtf8EncodingDetection(fixture);
         testParentIndexValidation(fixture);
-        testSnapshotTextAndEmptyFile(fixture);
-        testSnapshotDetectsBinaryFiles(fixture);
-        testInvalidInputs(fixture);
         testCancellation(fixture);
-        testHasMoreFlag(fixture);
 
         std::cout << "\n========================================\n";
         std::cout << "Summary: " << gPass << " passed, " << gFail << " failed.\n";

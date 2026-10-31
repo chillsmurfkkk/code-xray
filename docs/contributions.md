@@ -80,7 +80,7 @@
 |---|---|---|---|---|---|
 | A-LIB | 3 | A | Tree-sitter: розбір, обхід, власна структура та діагностика. | [parse.cpp](../src/code/parse.cpp), CTest `parser`. | Реалізовано й перевірено; особиста демонстрація/ретроспектива цим записом не підтверджуються. |
 | B-LIB | 3 | B | JSON-профілі: парсинг, перевірка типів/ключів, серіалізація й запис. | [profiles.cpp](../src/analysis/profiles.cpp), CTest `profiles`. | Реалізовано й перевірено; наявна ретроспектива збережена. |
-| C-LIB | 3 | C | libgit2: відкриття репозиторію, first-parent revwalk, diff дерев (tree_to_tree), виявлення перейменувань, зчитування blob-файлів за деревом коміту, діагностика бінарних/symlink файлів. | [api.cpp](../src/history/api.cpp), [chillsmurfkkk.md](retrospectives/chillsmurfkkk.md), CTest `git_backend`. | Реалізовано й перевірено; додано ретроспективу. |
+| C-LIB | 3 | C | libgit2: відкриття репозиторію, first-parent revwalk, diff дерев (tree_to_tree), виявлення перейменувань, зчитування blob-файлів за деревом коміту, діагностика бінарних/symlink файлів. | [api.cpp](../src/history/api.cpp), [kostukoleksandr.md](retrospectives/kostukoleksandr.md), CTest `git_backend`. | Реалізовано й перевірено; додано ретроспективу. |
 | D-LIB | 3 | D | inja для HTML та nlohmann/json для моделі/JSON-експорту. | [exporter.cpp](../src/review/exporter.cpp), CTest `export`. | Реалізовано й перевірено; особиста демонстрація/ретроспектива цим записом не підтверджуються. |
 
 Технічні матеріали B: [профілі](analysis-profiles.md),
@@ -95,4 +95,4 @@
 
 ЛР2 C: 4 форми, 23 контроли, 4 контейнери та 12 обробників підключено до спільного вікна. [Перелік C](contributions/C.md).
 
-ЛР3 C: libgit2-бекенд для читання реальних Git-репозиторіїв, first-parent обхід, ізольована тестова фікстура, ретроспектива [chillsmurfkkk.md](retrospectives/chillsmurfkkk.md). [api.cpp](../src/history/api.cpp), CTest `git_backend`.
+ЛР3 C: libgit2-бекенд для читання реальних Git-репозиторіїв, first-parent обхід, ізольована тестова фікстура, ретроспектива [kostukoleksandr.md](retrospectives/kostukoleksandr.md). [api.cpp](../src/history/api.cpp), CTest `git_backend`.
