@@ -1,5 +1,6 @@
 #include "app/main_window.hpp"
 #include "ui/code/source_page.hpp"
+#include "ui/code/file_selection_page.hpp"
 #include "ui/shared/popup_style.hpp"
 #include "ui/shared/theme.hpp"
 
@@ -73,6 +74,39 @@ int main(int argc, char** argv) {
         writeFile(first, "int square(int x) { return x * x; }\n");
         writeFile(second, "void other() {}\n");
         writeFile(outside.path() + "/outside.cpp", "void outside() {}\n");
+
+        FileSelectionPage filters;
+        auto* extensions = child<QLineEdit>(filters, "extensionsInput");
+        auto* exclusions = child<QListWidget>(filters, "excludedDirectories");
+        auto* exclusionInput = child<QLineEdit>(filters, "exclusionInput");
+        auto* exclusionMessage = child<QLabel>(filters, "exclusionMessage");
+        exclusionInput->setText("generated");
+        child<QPushButton>(filters, "addExclusion")->click();
+        exclusionInput->setText("generated");
+        child<QPushButton>(filters, "addExclusion")->click();
+        require(!exclusionMessage->text().isEmpty() && exclusions->findItems("generated", Qt::MatchExactly).size() == 1,
+            "Duplicate exclusion must be rejected");
+        exclusionInput->setText("invalid/path");
+        child<QPushButton>(filters, "addExclusion")->click();
+        require(!exclusionMessage->text().isEmpty(), "A path must not be accepted as a directory name");
+        exclusions->clear();
+        exclusions->addItem("generated");
+        xray::code::FileSelection selection;
+        selection.relativePaths = {"src/example.cpp"};
+        extensions->setText(".cpp, .hpp, .cpp");
+        QString filterError;
+        require(filters.applyTo(selection, filterError), "Valid filters must be accepted");
+        require((selection.extensions == std::vector<std::string>{".cpp", ".hpp"})
+            && (selection.excludedDirectories == std::vector<std::string>{"generated"})
+            && (selection.relativePaths == std::vector<std::string>{"src/example.cpp"}),
+            "Filters must preserve selected paths and deduplicate extensions");
+        const auto previousSelection = selection;
+        extensions->setText(".cpp, hpp");
+        require(!filters.applyTo(selection, filterError) && !filterError.isEmpty() && selection == previousSelection,
+            "Invalid filters must leave the selection unchanged");
+        exclusions->item(0)->setSelected(true);
+        child<QPushButton>(filters, "removeExclusion")->click();
+        require(exclusions->count() == 0, "Selected exclusions must be removable");
 
         SourcePage page;
         auto* scan = child<QPushButton>(page, "sourceScan");
@@ -173,6 +207,36 @@ int main(int argc, char** argv) {
         start->click();
         waitFor([&] { return start->isEnabled(); });
         require(tree->topLevelItemCount() == 2, "Retry must scan the entire directory after clearing selection");
+
+        QTemporaryDir filterFixture((output.isEmpty() ? QDir::tempPath() : output) + "/filter-XXXXXX");
+        require(filterFixture.isValid() && QDir(filterFixture.path()).mkpath("generated"), "Filter fixture must exist");
+        writeFile(filterFixture.path() + "/keep.cpp", "void keep() {}\n");
+        writeFile(filterFixture.path() + "/skip.hpp", "void header();\n");
+        writeFile(filterFixture.path() + "/generated/skip.cpp", "void generated() {}\n");
+        auto* filterPage = child<FileSelectionPage>(window, "fileSelectionPage");
+        auto* windowExtensions = child<QLineEdit>(*filterPage, "extensionsInput");
+        auto* windowExclusions = child<QListWidget>(*filterPage, "excludedDirectories");
+        windowExtensions->setText(".cpp");
+        windowExclusions->addItem("generated");
+        source->setDirectory(filterFixture.path());
+        start->click();
+        require(!filterPage->isEnabled(), "Filters must be disabled while scanning");
+        waitFor([&] { return start->isEnabled(); });
+        require(filterPage->isEnabled() && tree->topLevelItemCount() == 1
+            && tree->topLevelItem(0)->text(0).contains("keep.cpp"),
+            "Background scan must apply extensions and directory exclusions");
+        windowExtensions->setText(".cpp, .cc, .cxx, .h, .hpp, .hxx");
+        delete windowExclusions->takeItem(windowExclusions->count() - 1);
+
+        navigation->setCurrentRow(1);
+        for (const auto theme : {Theme::dark, Theme::light}) {
+            applyTheme(app, theme);
+            app.processEvents();
+            if (!output.isEmpty()) require(window.grab().save(output + (theme == Theme::dark
+                ? "/filters-dark.png" : "/filters-light.png")), "Could not render filters");
+        }
+        navigation->setCurrentRow(0);
+        source->setDirectory(root);
 
         const auto broken = root + "/broken.cpp";
         writeFile(broken, "int broken( { return ;\n");

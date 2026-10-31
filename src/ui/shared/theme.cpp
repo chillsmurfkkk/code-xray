@@ -189,7 +189,7 @@ void applyTheme(QApplication& application, Theme theme) {
             background: %9; color: %6; border: none;
             border-radius: 10px; padding: 5px 10px;
         }
-        QTreeWidget#structureTree, QListWidget#sourceFiles, QPlainTextEdit#sourceCode {
+        QTreeWidget#structureTree, QListWidget#sourceFiles, QListWidget#excludedDirectories, QPlainTextEdit#sourceCode {
             background: transparent; color: %5;
             border: 1px solid transparent; border-radius: 8px; padding: 4px;
             selection-background-color: %3; selection-color: %5;
@@ -197,9 +197,9 @@ void applyTheme(QApplication& application, Theme theme) {
         QTreeWidget#structureTree:focus, QPlainTextEdit#sourceCode:focus { border-color: %7; }
         QTreeWidget#structureTree { show-decoration-selected: 0; outline: 0; }
         QTreeWidget#structureTree::item { min-height: 20px; padding: 4px 8px; border: none; background: transparent; }
-        QListWidget#sourceFiles:focus { border-color: %7; }
-        QListWidget#sourceFiles::item { min-height: 20px; padding: 4px 8px; border: none; border-radius: 6px; }
-        QListWidget#sourceFiles::item:selected { background: %3; color: %5; }
+        QListWidget#sourceFiles:focus, QListWidget#excludedDirectories:focus { border-color: %7; }
+        QListWidget#sourceFiles::item, QListWidget#excludedDirectories::item { min-height: 20px; padding: 4px 8px; border: none; border-radius: 6px; }
+        QListWidget#sourceFiles::item:selected, QListWidget#excludedDirectories::item:selected { background: %3; color: %5; }
         QProgressBar#sourceProgress {
             background: %1; color: %5; border: 1px solid %4;
             border-radius: 6px; padding: 2px; min-height: 18px; text-align: center;

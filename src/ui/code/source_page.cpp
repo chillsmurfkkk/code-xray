@@ -279,8 +279,12 @@ void SourcePage::updateActions() {
     cancelButton_->setVisible(loading_);
     cancelButton_->setEnabled(loading_ && !cancelling_);
     selectionLabel_->setText(count == 0
-        ? QString::fromUtf8("Уся папка · стандартні розширення C++, без .git, build, vendor і third_party.")
-        : QString::fromUtf8("Лише вибрані файли: %1. Стандартні фільтри C++ також застосовуються.").arg(count));
+        ? QString::fromUtf8(
+            "Уся папка · застосовуються правила зі сторінки «Відбір файлів»."
+        )
+        : QString::fromUtf8(
+            "Лише вибрані файли: %1. Також застосовуються правила зі сторінки «Відбір файлів»."
+        ).arg(count));
 }
 
 } // namespace xray::ui

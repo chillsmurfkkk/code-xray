@@ -11,6 +11,7 @@ class QThread;
 class QStackedWidget;
 
 namespace xray::ui {
+class FileSelectionPage;
 class SourcePage;
 class StructurePage;
 namespace analysis_pages { class Workspace; }
@@ -51,6 +52,7 @@ private:
     QStackedWidget* contentStack_ = nullptr;
     ui::StructurePage* structure_ = nullptr;
     ui::SourcePage* source_ = nullptr;
+    ui::FileSelectionPage* fileSelection_ = nullptr;
     AnalysisController* analysisController_ = nullptr;
     ui::analysis_pages::Workspace* analysisPages_ = nullptr;
     ui::review::ComparisonPage* comparisonPage_ = nullptr;
