@@ -1,4 +1,5 @@
 #include "source_page.hpp"
+#include "ui/shared/theme.hpp"
 
 #include <QDir>
 #include <QFileInfo>
@@ -11,6 +12,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -42,9 +44,13 @@ SourcePage::SourcePage(QWidget* parent) : QWidget(parent) {
     body->setSpacing(12);
     layout->addWidget(panel, 1);
     auto* scroll = new QScrollArea(panel);
+    scroll->setObjectName("sourceFormScroll");
+    scroll->verticalScrollBar()->setObjectName("sourceFormScrollBar");
+    styleWorkspaceScrollBar(scroll->verticalScrollBar());
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
     auto* formWidget = new QWidget(scroll);
+    formWidget->setObjectName("sourceFormContents");
     auto* form = new QVBoxLayout(formWidget);
     form->setContentsMargins(0, 0, 0, 0);
     form->setSpacing(12);
