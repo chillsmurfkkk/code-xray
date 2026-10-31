@@ -1,5 +1,6 @@
 #include "structure_page.hpp"
 #include "ui/shared/icons.hpp"
+#include "ui/shared/theme.hpp"
 #include "code_view.hpp"
 
 #include <QApplication>
@@ -13,6 +14,7 @@
 #include <QSplitter>
 #include <QSplitterHandle>
 #include <QStackedWidget>
+#include <QScrollBar>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QSignalBlocker>
@@ -288,6 +290,8 @@ StructurePage::StructurePage(QWidget* parent) : QWidget(parent) {
     tree_ = new QTreeWidget(treeContent);
     tree_->setItemDelegate(new EntityDelegate(tree_));
     tree_->setObjectName("structureTree");
+    tree_->verticalScrollBar()->setObjectName("structureScrollBar");
+    styleWorkspaceScrollBar(tree_->verticalScrollBar());
     tree_->setHeaderHidden(true);
     tree_->setColumnCount(1);
     tree_->setUniformRowHeights(true);

@@ -13,6 +13,8 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSettings>
+#include <QScrollBar>
+#include <QStackedWidget>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -52,6 +54,7 @@ int main(int argc, char** argv) {
     app.setOrganizationName("CodeXrayGuiTests");
     app.setApplicationName("Source");
     xray::ui::installPopupStyle(app);
+    xray::ui::applyTheme(app, xray::ui::Theme::dark);
     const QString output = app.arguments().value(1);
     if (!output.isEmpty()) require(QDir().mkpath(output), "Could not create render directory");
     QTemporaryDir fixture((output.isEmpty() ? QDir::tempPath() : output) + "/fixture-XXXXXX");
@@ -184,6 +187,27 @@ int main(int argc, char** argv) {
         waitFor([&] { return start->isEnabled(); });
         require(message->text().contains(QString::fromUtf8("файлів немає")) && tree->topLevelItemCount() == 0,
             "An empty valid root must be a successful empty result");
+        navigation->setCurrentRow(2);
+        for (int i = 0; i < 100; ++i)
+            new QTreeWidgetItem(tree, QStringList{QString("item-%1").arg(i)});
+        tree->setEnabled(true);
+        child<QStackedWidget>(window, "structureContent")->setCurrentWidget(tree);
+        app.processEvents();
+        auto* treeScroll = tree->verticalScrollBar();
+        require(treeScroll->maximum() > 0 && treeScroll->width() <= 12,
+            "Structure tree must have a narrow scrollbar when its contents overflow");
+        treeScroll->setValue(0);
+        treeScroll->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+        require(treeScroll->value() > 0, "Styled scrollbar must still scroll");
+        for (const auto theme : {Theme::dark, Theme::light}) {
+            applyTheme(app, theme);
+            app.processEvents();
+            require(treeScroll->width() <= 12 && treeScroll->maximum() > 0,
+                "Scrollbar must keep its size and range after changing theme");
+            if (!output.isEmpty()) require(window.grab().save(output + (theme == Theme::dark
+                ? "/scroll-dark.png" : "/scroll-light.png")), "Could not render scrollbar");
+        }
+        navigation->setCurrentRow(0);
         source->setDirectory(root);
         source->addFiles({first, second});
         source->showResult(QString::fromUtf8("Готово · контрольний вигляд сторінки."), true);

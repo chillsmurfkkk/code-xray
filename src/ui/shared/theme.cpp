@@ -4,6 +4,7 @@
 #include <QColor>
 #include <QPalette>
 #include <QSettings>
+#include <QScrollBar>
 #include <QString>
 
 namespace xray::ui {
@@ -15,6 +16,15 @@ QColor blend(const QColor& from, const QColor& to, qreal amount) {
         from.blueF() + (to.blueF() - from.blueF()) * amount);
 }
 } // namespace
+
+void styleWorkspaceScrollBar(QScrollBar* scrollBar) {
+    scrollBar->setStyleSheet(QStringLiteral(R"QSS(
+        QScrollBar:vertical { background: transparent; border: none; width: 8px; margin: 0; }
+        QScrollBar::handle:vertical { background: palette(mid); min-height: 28px; border-radius: 4px; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+    )QSS"));
+}
 
 SyntaxColors syntaxColors(const QPalette& palette) {
     const bool dark =
@@ -195,20 +205,24 @@ void applyTheme(QApplication& application, Theme theme) {
             border-radius: 6px; padding: 2px; min-height: 18px; text-align: center;
         }
         QProgressBar#sourceProgress::chunk { background: %7; border-radius: 4px; }
+        QScrollArea#sourceFormScroll, QScrollArea#sourceFormScroll > QWidget#qt_scrollarea_viewport,
+        QWidget#sourceFormContents { background: transparent; border: none; }
         QSplitter#structureSplit::handle { background: transparent; }
         QToolTip {
             background: %2; color: %5; border: 1px solid %4;
             border-radius: 8px; padding: 7px 10px;
         }
         QWidget#pagesPanel QScrollBar:vertical,
-        QTreeWidget#structureTree QScrollBar:vertical,
+        QScrollBar#structureScrollBar:vertical,
+        QScrollBar#sourceFormScrollBar:vertical,
         QPlainTextEdit#sourceCode QScrollBar:vertical,
         QTableWidget QScrollBar:vertical,
         QTableView QScrollBar:vertical {
             width: 8px; background: transparent; margin: 0;
         }
         QWidget#pagesPanel QScrollBar::handle:vertical,
-        QTreeWidget#structureTree QScrollBar::handle:vertical,
+        QScrollBar#structureScrollBar::handle:vertical,
+        QScrollBar#sourceFormScrollBar::handle:vertical,
         QPlainTextEdit#sourceCode QScrollBar::handle:vertical,
         QTableWidget QScrollBar::handle:vertical,
         QTableView QScrollBar::handle:vertical {
@@ -216,8 +230,10 @@ void applyTheme(QApplication& application, Theme theme) {
         }
         QWidget#pagesPanel QScrollBar::add-line:vertical,
         QWidget#pagesPanel QScrollBar::sub-line:vertical,
-        QTreeWidget#structureTree QScrollBar::add-line:vertical,
-        QTreeWidget#structureTree QScrollBar::sub-line:vertical,
+        QScrollBar#structureScrollBar::add-line:vertical,
+        QScrollBar#structureScrollBar::sub-line:vertical,
+        QScrollBar#sourceFormScrollBar::add-line:vertical,
+        QScrollBar#sourceFormScrollBar::sub-line:vertical,
         QPlainTextEdit#sourceCode QScrollBar::add-line:vertical,
         QPlainTextEdit#sourceCode QScrollBar::sub-line:vertical,
         QTableWidget QScrollBar::add-line:vertical,
@@ -226,8 +242,10 @@ void applyTheme(QApplication& application, Theme theme) {
         QTableView QScrollBar::sub-line:vertical { height: 0; }
         QWidget#pagesPanel QScrollBar::add-page:vertical,
         QWidget#pagesPanel QScrollBar::sub-page:vertical,
-        QTreeWidget#structureTree QScrollBar::add-page:vertical,
-        QTreeWidget#structureTree QScrollBar::sub-page:vertical,
+        QScrollBar#structureScrollBar::add-page:vertical,
+        QScrollBar#structureScrollBar::sub-page:vertical,
+        QScrollBar#sourceFormScrollBar::add-page:vertical,
+        QScrollBar#sourceFormScrollBar::sub-page:vertical,
         QPlainTextEdit#sourceCode QScrollBar::add-page:vertical,
         QPlainTextEdit#sourceCode QScrollBar::sub-page:vertical,
         QTableWidget QScrollBar::add-page:vertical,
