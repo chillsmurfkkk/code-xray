@@ -550,6 +550,31 @@ void StructurePage::setSnapshot(
     applyFilters();
 }
 
+bool StructurePage::openLocation(const QString& path, int line) {
+    if (!snapshot_) return false;
+    for (int i = 0; i < tree_->topLevelItemCount(); ++i) {
+        auto* item = tree_->topLevelItem(i);
+        bool valid = false;
+        const auto index = item->data(0, UnitIndexRole).toULongLong(&valid);
+        if (!valid || index >= snapshot_->units.size()) continue;
+        const auto& unit = snapshot_->units[static_cast<std::size_t>(index)];
+        if (QString::fromStdString(unit.relativePath) != path || !unit.root || !unit.root->sourceBytes) continue;
+        searchInput_->clear();
+        kindFilter_->setCurrentIndex(0);
+        tree_->setCurrentItem(item);
+        onEntitySelected(item);
+        const auto& starts = codeView_->sourceLineStarts();
+        if (line > 0 && static_cast<std::size_t>(line) <= starts.size()) {
+            QTextCursor cursor(codeView_->document());
+            cursor.setPosition(starts[static_cast<std::size_t>(line - 1)]);
+            codeView_->setTextCursor(cursor);
+            codeView_->ensureCursorVisible();
+        }
+        return true;
+    }
+    return false;
+}
+
 void StructurePage::onEntitySelected(QTreeWidgetItem* item) {
     if (item && snapshot_ && displayedUnit_) {
         bool validIndex = false;

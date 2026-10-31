@@ -29,6 +29,7 @@ public:
     void setProgress(const Progress& progress);
     void setCancelling();
     void showResult(const QString& message, bool canOpenStructure = false);
+    void requestScan();
 
 signals:
     void browseDirectoryRequested();
@@ -40,7 +41,6 @@ signals:
 private:
     void updateActions();
     void sourceChanged();
-    void requestScan();
 
     QLineEdit* directoryInput_ = nullptr;
     QPushButton* browseButton_ = nullptr;

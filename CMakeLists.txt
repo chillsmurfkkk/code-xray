@@ -178,6 +178,8 @@ if(CODE_XRAY_BUILD_APP)
         src/ui/code/source_page.hpp
         src/ui/code/file_selection_page.cpp
         src/ui/code/file_selection_page.hpp
+        src/ui/code/diagnostics_page.cpp
+        src/ui/code/diagnostics_page.hpp
         src/ui/code/demo_snapshot.cpp
         src/ui/code/demo_snapshot.hpp
         src/ui/code/code_view.cpp

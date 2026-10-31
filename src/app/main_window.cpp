@@ -1,11 +1,14 @@
 #include "main_window.hpp"
 #include "app/analysis_controller.hpp"
 #include "ui/analysis/workspace.hpp"
+
+#include "ui/shared/navigation.hpp"
+#include "ui/shared/theme.hpp"
+
 #include "ui/code/structure_page.hpp"
 #include "ui/code/source_page.hpp"
 #include "ui/code/file_selection_page.hpp"
-#include "ui/shared/navigation.hpp"
-#include "ui/shared/theme.hpp"
+#include "ui/code/diagnostics_page.hpp"
 
 #include "ui/review/ComparisonPage.hpp"
 #include "ui/review/TrendPage.hpp"
@@ -66,6 +69,9 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     fileSelection_ = new ui::FileSelectionPage(contentStack_);
     contentStack_->addWidget(fileSelection_);
 
+    diagnostics_ = new ui::DiagnosticsPage(contentStack_);
+    contentStack_->addWidget(diagnostics_);
+
     analysisController_ = new AnalysisController(this);
     analysisPages_ = new ui::analysis_pages::Workspace(analysisController_->session(), contentStack_);
     contentStack_->addWidget(analysisPages_);
@@ -110,8 +116,10 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
                 contentStack_->setCurrentWidget(source_);
             } else if (pageIndex == 1) {
                 contentStack_->setCurrentWidget(fileSelection_);
-            } else if (pageIndex == 2) { // Структура
+            } else if (pageIndex == 2) {
                 contentStack_->setCurrentWidget(structure_);
+            } else if (pageIndex == 3) {
+                contentStack_->setCurrentWidget(diagnostics_);
             }
         } else if (section == ui::Section::analysis) {
             analysisPages_->setCurrentPage(pageIndex);
@@ -220,6 +228,15 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         navigation->setCurrentPage(ui::Section::code, 2);
     });
 
+    connect(diagnostics_, &ui::DiagnosticsPage::reparseRequested, this, [this, navigation] {
+        navigation->setCurrentPage(ui::Section::code, 0);
+        source_->requestScan();
+    });
+    connect(diagnostics_, &ui::DiagnosticsPage::openCodeRequested, this,
+            [this, navigation](const QString& path, int line) {
+        if (structure_->openLocation(path, line)) navigation->setCurrentPage(ui::Section::code, 2);
+    });
+
     connect(navigation, &ui::NavigationPanel::themeToggleRequested, this, [this, navigation]() {
         theme_ = theme_ == ui::Theme::dark ? ui::Theme::light : ui::Theme::dark;
         ui::applyTheme(*qApp, theme_);
@@ -260,6 +277,7 @@ void MainWindow::loadSource(code::SourceRequest request) {
     structure_->setLoading(true);
     source_->setLoading(true);
     fileSelection_->setEnabled(false);
+    diagnostics_->setLoading(true);
     statusBar()->showMessage(
         QString::fromUtf8("Збираємо файли та розбираємо код…")
     );
@@ -315,6 +333,7 @@ void MainWindow::loadSource(code::SourceRequest request) {
             structure_->setLoading(false);
             source_->setLoading(false);
             fileSelection_->setEnabled(true);
+            diagnostics_->setLoading(false);
             statusBar()->clearMessage();
 
             if (sourceStop_.stop_requested() || std::holds_alternative<Cancelled>(*result)) {
@@ -381,6 +400,7 @@ MainWindow::~MainWindow() {
 
 void MainWindow::setSnapshot(std::shared_ptr<const code::ParsedSnapshot> snapshot, bool demonstration) {
     structure_->setSnapshot(snapshot, demonstration);
+    diagnostics_->setSnapshot(snapshot, demonstration);
     analysisPages_->setContext(!snapshot ? QString::fromUtf8("Відкрийте джерело у розділі «Код → Джерело».")
         : demonstration ? QString::fromUtf8("Демонстраційний знімок")
                         : QString::fromUtf8("Поточний знімок відкритої папки"));
