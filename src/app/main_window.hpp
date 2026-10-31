@@ -3,6 +3,7 @@
 #include <QMainWindow>
 #include <stop_token>
 #include "code/types.hpp"
+#include "common/job.hpp"
 
 #include "ui/shared/theme.hpp"
 
@@ -10,6 +11,7 @@ class QThread;
 class QStackedWidget;
 
 namespace xray::ui {
+class SourcePage;
 class StructurePage;
 namespace analysis_pages { class Workspace; }
 namespace review {
@@ -37,16 +39,18 @@ public:
 
 private:
     ui::Theme theme_;
-    void loadDirectory(
-        const QString& directory,
-        ui::StructurePage* structure
-    );
+    void loadDirectory(const QString& directory);
+    void loadSource(code::SourceRequest request);
+
+    void cancelSource();
 
     QThread* sourceThread_ = nullptr;
     std::stop_source sourceStop_;
+    JobId sourceJobId_ = 0;
 
     QStackedWidget* contentStack_ = nullptr;
     ui::StructurePage* structure_ = nullptr;
+    ui::SourcePage* source_ = nullptr;
     AnalysisController* analysisController_ = nullptr;
     ui::analysis_pages::Workspace* analysisPages_ = nullptr;
     ui::review::ComparisonPage* comparisonPage_ = nullptr;

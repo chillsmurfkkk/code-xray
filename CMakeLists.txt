@@ -174,6 +174,8 @@ if(CODE_XRAY_BUILD_APP)
         src/ui/shared/navigation.hpp
         src/ui/code/structure_page.cpp
         src/ui/code/structure_page.hpp
+        src/ui/code/source_page.cpp
+        src/ui/code/source_page.hpp
         src/ui/code/demo_snapshot.cpp
         src/ui/code/demo_snapshot.hpp
         src/ui/code/code_view.cpp
@@ -217,7 +219,10 @@ if(CODE_XRAY_BUILD_APP)
         set_target_properties(analysis_ui_tests PROPERTIES AUTOMOC ON)
         target_link_libraries(analysis_ui_tests PRIVATE xray_ui xray_code Qt6::Test)
         add_test(NAME analysis_ui COMMAND analysis_ui_tests)
-        set_tests_properties(analysis_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+        set_tests_properties(analysis_ui PROPERTIES TIMEOUT 30)
+        if(NOT WIN32)
+            set_tests_properties(analysis_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        endif()
 
         add_executable(history_ui_tests tests/history/ui_tests.cpp src/app/main_window.cpp)
         set_target_properties(history_ui_tests PROPERTIES AUTOMOC ON)
@@ -230,6 +235,11 @@ if(CODE_XRAY_BUILD_APP)
         add_dependencies(gui_design_tests code-xray)
         add_test(NAME gui_design COMMAND gui_design_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-design")
         set_tests_properties(gui_design PROPERTIES TIMEOUT 30)
+
+        add_executable(gui_source_tests tests/ui/source_tests.cpp src/app/main_window.cpp)
+        target_link_libraries(gui_source_tests PRIVATE xray_ui xray_code Qt6::Test)
+        add_test(NAME gui_source COMMAND gui_source_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-source")
+        set_tests_properties(gui_source PROPERTIES TIMEOUT 45)
 
         add_executable(gui_snapshot_tests tests/ui/snapshot_tests.cpp)
         target_link_libraries(gui_snapshot_tests PRIVATE xray_ui xray_code)

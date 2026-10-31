@@ -145,7 +145,7 @@ void NavigationPanel::showSection(Section section) {
     if (section == Section::code) {
         sectionTitle_->setText(QString::fromUtf8("Код"));
         sectionSubtitle_->setText(QString::fromUtf8("Файли та структура"));
-        addPage(Symbol::source, QString::fromUtf8("Джерело"), false);
+        addPage(Symbol::source, QString::fromUtf8("Джерело"), true);
         addPage(Symbol::filter, QString::fromUtf8("Відбір файлів"), false);
         addPage(Symbol::structure, QString::fromUtf8("Структура"), true);
         addPage(Symbol::diagnostics, QString::fromUtf8("Діагностика"), false);
