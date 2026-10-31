@@ -1,7 +1,11 @@
 # libgit2: integration notes and retrospective (C, PR3)
 
+Author: Oleksandr Kostiuk (kostukoleksandr)  
+Role: Developer C (Git & History module)  
+Project: CodeXray
+
 This document records the architectural decisions, implementation details, personal experience,
-and reference sources for integrating `libgit2` into the CodeXray History module (Developer C, Lab 3).
+and reference sources for integrating `libgit2` into the CodeXray History module.
 
 ---
 
@@ -25,17 +29,20 @@ The integration is encapsulated in `src/history/api.cpp` behind the pure E0 cont
    - **Repository Opening**: Uses `git_repository_open` with fallback to `git_repository_discover` for subdirectory paths.
    - **First-Parent Revwalk**: Configures `git_revwalk_new`, `GIT_SORT_TOPOLOGICAL | GIT_SORT_TIME`, and strictly enforces `git_revwalk_simplify_first_parent` to guarantee consistent trend lines and avoid polluting linear release branches with merged feature branch commits.
    - **Commit Metadata Extraction**: Extracts author, committer, Unix timestamps, parent OID arrays, and commit messages.
+   - **Multi-Commit Parent Selection**: Validates `request.parentIndex` against merge commits (`parentCount > 1`). For regular single-parent commits (`parentCount == 1`) in a multi-commit first-parent traversal, diffs correctly against their only parent (index 0), preventing crashes when `parentIndex > 0` is passed with `limit > 1`.
    - **Tree-to-Tree Diff**: Uses `git_diff_tree_to_tree` between the target commit tree and the selected parent tree (or an empty root tree if `parentCount == 0`).
    - **Rename Detection**: Enables `git_diff_find_similar` with `GIT_DIFF_FIND_RENAMES`.
    - **Line-Level Patch Stats**: Computes added/deleted lines using `git_patch_line_stats` for text files.
-   - **Pathspec Filtering**: Filters diffs via `diffOpts.pathspec` and drops commits that do not modify the requested `relativePath`, preventing them from polluting the commit history or exhausting the pagination `limit`.
-   - **Strict Parent Validation**: Rejects invalid `parentIndex` values (e.g., non-zero for root commits, or indices exceeding `parentCount - 1`) with `xray::ErrorCode::invalid_input`.
+   - **Literal Pathspec and Accurate Delta Filtering**: Employs `GIT_DIFF_DISABLE_PATHSPEC_MATCH` so that filenames containing characters like `*`, `?`, or `[` are treated literally instead of being expanded as fnmatch wildcards. Only changes exactly matching `relativePath` are accumulated.
+   - **Exact `hasMore` Lookahead**: For file history queries (`relativePath`), `hasMore` is only set to `true` if an older commit down the revwalk chain actually touched the requested file, preventing false positives at the tail of file history.
+   - **Strict Parent Validation**: Rejects invalid `parentIndex` values (e.g., non-zero for root commits, or indices exceeding `parentCount - 1` for merge commits) with `xray::ErrorCode::invalid_input`.
    - **Cooperative Cancellation**: Checks `ctx.isCancelled()` before each revwalk step and returns `xray::Cancelled`.
 2. `loadSnapshot(spec, oid, selection, ctx)`:
-   - **Tree Traversal**: Performs `git_tree_walk(..., GIT_TREEWALK_PRE, ...)` to iterate all entries of the commit tree.
+   - **Tree Traversal with Error Checking**: Performs `git_tree_walk(..., GIT_TREEWALK_PRE, ...)`, and strictly checks its return code to return `xray::ErrorCode::read_error` if traversal of any nested tree fails.
+   - **Nested Excluded Directories**: Traverses `std::filesystem::path(relPath).parent_path()` to ensure that directory names listed in `selection.excludedDirectories` (e.g. `vendor`) are excluded at any depth (e.g. `src/vendor/vendored.cpp`).
    - **Selective Scope Filtering**: Paths filtered out by `FileSelection` (unmatched extensions, excluded directories) are skipped naturally without marking the snapshot as partial or corrupting coverage metrics.
    - **Non-Regular File Diagnostics**: Inspects `git_tree_entry_filemode`. Symlinks (`GIT_FILEMODE_LINK`) and submodules (`GIT_FILEMODE_COMMIT`) that match the selection path are skipped with explicit diagnostics recorded in `snapshot.coverage.diagnostics` and tracked in `skippedElements`.
-   - **Binary and Corrupt File Detection**: Uses `git_blob_is_binary` and inspects embedded NUL bytes. Binary files are excluded from `SourceSnapshot.files` and reported as `unsupported_encoding` in diagnostics, correctly marking `coverage.completeness = Completeness::partial`.
+   - **Strict UTF-8 Encoding Validation**: In addition to `git_blob_is_binary` and NUL byte checks, implements RFC 3629 / Unicode Standard byte sequence validation (`isValidUtf8`). Non-UTF-8 text files (e.g., Windows-1251, ISO-8859-1) are rejected with `unsupported_encoding` diagnostics and mark `coverage.completeness = Completeness::partial`.
    - **Zero-Byte File Support**: Handles empty text files (0 bytes) as valid `SourceFile` entries with empty buffers, without false-positive error reporting.
 
 ---
@@ -50,14 +57,16 @@ The integration is encapsulated in `src/history/api.cpp` behind the pure E0 cont
 
 ## 4. Challenges and Key Lessons
 
-1. **Scope and Lifetime in C APIs**:
-   Passing array pointers such as `diffOpts.pathspec.strings` requires ensuring the backing C strings and pointer arrays live for the duration of the C API call (`git_diff_tree_to_tree`), rather than expiring at the end of conditional inner blocks.
-2. **First-Parent Semantics in Merge Commits**:
-   Standard revwalk without `git_revwalk_simplify_first_parent` traverses all branches merged into the trunk. For metric tracking and historical trends, traversing secondary parents breaks linear time ordering. Enforcing first-parent simplification solved this.
+1. **Pathspec Wildcard Disabling in C APIs**:
+   By default, `libgit2` pathspecs use fnmatch matching. If a valid source file contains characters like `[1]`, git matches it against patterns. Using `GIT_DIFF_DISABLE_PATHSPEC_MATCH` instructs libgit2 to interpret pathspecs as exact literal prefixes/paths.
+2. **First-Parent Semantics in Multi-Commit Walks**:
+   A query requesting `parentIndex = 1` for a merge commit must not blindly pass index 1 to subsequent non-merge commits in the history chain, as they only have a single parent (index 0). Differentiating merge commits (`parentCount > 1`) from linear commits ensured history traversal continues seamlessly without invalid input errors.
 3. **Difference Between Filter Skipping and Diagnostic Errors**:
-   A key architectural realization was separating intentional scope exclusion (files filtered out by user-requested extensions) from operational failures (binary files, symlinks, unreadable blobs). Normal filters must produce `Completeness::complete`, whereas problematic entries within scope produce `Completeness::partial` with diagnostic explanations.
-4. **Deterministic Unit Testing with In-Memory / Isolated Fixtures**:
-   Relying on the host project's `.git` folder creates brittle tests vulnerable to shallow clones and commit history changes. Creating a programmatic fixture via `TestGitRepo` using `libgit2` (root, branch, merge, binary, empty files) created 100% reproducible, fast, and hermetic tests.
+   A key architectural realization was separating intentional scope exclusion (files filtered out by user-requested extensions or nested excluded directories) from operational failures (binary files, symlinks, unreadable blobs, non-UTF8 encodings). Normal filters must produce `Completeness::complete`, whereas problematic entries within scope produce `Completeness::partial` with diagnostic explanations.
+4. **Lookahead for Tail-Accurate Pagination (`hasMore`)**:
+   Standard pagination simply checks if revwalk has more commits when `seen == limit`. But for path-filtered history, revwalk might have older commits that never touched the path. Checking ahead until either a relevant commit is found or the walk terminates avoids misleading `hasMore = true` flags.
+5. **Deterministic Unit Testing with In-Memory / Isolated Fixtures**:
+   Relying on the host project's `.git` folder creates brittle tests vulnerable to shallow clones and commit history changes. Creating a programmatic fixture via `TestGitRepo` using `libgit2` (root, branch, merge, binary, non-UTF8, bracket files, nested vendor) created 100% reproducible, fast, and hermetic tests.
 
 ---
 
@@ -66,9 +75,10 @@ The integration is encapsulated in `src/history/api.cpp` behind the pure E0 cont
 - [libgit2 API Documentation](https://libgit2.org/libgit2/):
   - Repository API: `git_repository_open`, `git_repository_discover`
   - Revwalk API: `git_revwalk_new`, `git_revwalk_simplify_first_parent`, `git_revwalk_sorting`
-  - Diff API: `git_diff_tree_to_tree`, `git_diff_find_similar`, `git_patch_line_stats`
+  - Diff API: `git_diff_tree_to_tree`, `git_diff_find_similar`, `git_patch_line_stats`, `GIT_DIFF_DISABLE_PATHSPEC_MATCH`
   - Tree & Blob API: `git_tree_walk`, `git_blob_lookup`, `git_blob_is_binary`, `git_tree_entry_filemode`
 - [Pro Git (Scott Chacon, Ben Straub)](https://git-scm.com/book/en/v2):
   - Chapter 10: *Git Internals* (Plumbing and Porcelain, Git Objects, Tree Objects).
   - Appendix B: *Embedding Git in your Applications* (Libgit2 fundamentals).
+- [RFC 3629 / Unicode Standard](https://datatracker.ietf.org/doc/html/rfc3629): UTF-8 validation rules, overlong sequence rejection, surrogate code point restrictions.
 - [libgit2 by Example / Tutorials](https://libgit2.org/docs/guides/101-samples/): Reference patterns for commit creation, diff traversal, and tree builder usage.

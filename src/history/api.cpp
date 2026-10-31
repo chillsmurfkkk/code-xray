@@ -91,9 +91,51 @@ std::optional<ChangeStatus> mapDeltaStatus(git_delta_t delta) {
     }
 }
 
-// Check whether a path passes the FileSelection filter
+// Validate that a byte sequence is valid UTF-8 according to RFC 3629
+bool isValidUtf8(const char* data, std::size_t len) noexcept {
+    const auto* p = reinterpret_cast<const unsigned char*>(data);
+    const auto* end = p + len;
+
+    while (p < end) {
+        unsigned char c = *p++;
+        if (c <= 0x7F) {
+            // ASCII (disallowing NUL for source code)
+            if (c == '\0') return false;
+            continue;
+        } else if (c >= 0xC2 && c <= 0xDF) {
+            // 2-byte sequence
+            if (p >= end) return false;
+            unsigned char c2 = *p++;
+            if ((c2 & 0xC0) != 0x80) return false;
+        } else if (c >= 0xE0 && c <= 0xEF) {
+            // 3-byte sequence
+            if (p + 1 >= end) return false;
+            unsigned char c2 = *p++;
+            unsigned char c3 = *p++;
+            if ((c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80) return false;
+            if (c == 0xE0 && c2 < 0xA0) return false; // overlong
+            if (c == 0xED && c2 >= 0xA0) return false; // surrogate 0xD800..0xDFFF
+        } else if (c >= 0xF0 && c <= 0xF4) {
+            // 4-byte sequence
+            if (p + 2 >= end) return false;
+            unsigned char c2 = *p++;
+            unsigned char c3 = *p++;
+            unsigned char c4 = *p++;
+            if ((c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80 || (c4 & 0xC0) != 0x80) return false;
+            if (c == 0xF0 && c2 < 0x90) return false; // overlong
+            if (c == 0xF4 && c2 > 0x8F) return false; // > 0x10FFFF
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Check whether a path passes the FileSelection filter (including nested directory exclusions)
 bool pathMatchesSelection(const std::string& relPath,
                           const code::FileSelection& sel) {
+    std::filesystem::path p(relPath);
+
     if (!sel.relativePaths.empty()) {
         bool found = false;
         for (const auto& rp : sel.relativePaths) {
@@ -104,13 +146,15 @@ bool pathMatchesSelection(const std::string& relPath,
         if (!found) return false;
     }
 
-    for (const auto& excl : sel.excludedDirectories) {
-        if (relPath.starts_with(excl + "/") || relPath.starts_with(excl + "\\"))
-            return false;
+    // Check every component in directory path against excludedDirectories
+    for (const auto& component : p.parent_path()) {
+        const std::string dirName = component.string();
+        for (const auto& excl : sel.excludedDirectories) {
+            if (dirName == excl) return false;
+        }
     }
 
     if (!sel.extensions.empty()) {
-        std::filesystem::path p(relPath);
         const auto ext = p.extension().string();
         bool matched = false;
         for (const auto& e : sel.extensions) {
@@ -125,6 +169,7 @@ bool pathMatchesSelection(const std::string& relPath,
 void collectChanges(git_diff* diff,
                     const std::string& commitOid,
                     const std::optional<std::string>& parentOid,
+                    const std::optional<std::string>& exactPath,
                     std::vector<ChangeRecord>& out) {
     const std::size_t numDeltas = git_diff_num_deltas(diff);
     out.reserve(out.size() + numDeltas);
@@ -136,14 +181,19 @@ void collectChanges(git_diff* diff,
         auto maybeStatus = mapDeltaStatus(delta->status);
         if (!maybeStatus) continue;
 
+        const char* oldP = delta->old_file.path;
+        const char* newP = delta->new_file.path;
+
+        if (exactPath.has_value()) {
+            bool matches = (newP && *exactPath == newP) || (oldP && *exactPath == oldP);
+            if (!matches) continue;
+        }
+
         ChangeRecord rec;
         rec.commitOid = commitOid;
         rec.parentOid = parentOid;
         rec.status    = *maybeStatus;
         rec.isBinary  = (delta->flags & GIT_DIFF_FLAG_BINARY) != 0;
-
-        const char* oldP = delta->old_file.path;
-        const char* newP = delta->new_file.path;
 
         if (oldP && oldP[0]) rec.oldPath = oldP;
         if (newP && newP[0]) rec.newPath = newP;
@@ -220,13 +270,23 @@ Result<HistoryResult> query(const RepositorySpec& spec,
     git_oid oid{};
     int walkRc = 0;
 
+    // Diff options setup with literal pathspec to prevent fnmatch wildcard interpretation
+    std::string filterPath;
+    const char* pathSpec[1] = { nullptr };
+    git_diff_options diffOpts = GIT_DIFF_OPTIONS_INIT;
+    diffOpts.flags = GIT_DIFF_INCLUDE_TYPECHANGE;
+
+    if (request.relativePath.has_value()) {
+        filterPath = *request.relativePath;
+        pathSpec[0] = filterPath.c_str();
+        diffOpts.pathspec.strings = const_cast<char**>(pathSpec);
+        diffOpts.pathspec.count   = 1;
+        // Literal pathspec: do not treat '*', '?', '[' as wildcards
+        diffOpts.flags |= GIT_DIFF_DISABLE_PATHSPEC_MATCH;
+    }
+
     while ((walkRc = git_revwalk_next(&oid, walker.get())) == 0) {
         if (ctx.isCancelled()) return xray::Cancelled{};
-
-        if (seen >= request.limit) {
-            result.hasMore = true;
-            break;
-        }
 
         CommitHandle commit;
         if (git_commit_lookup(&commit.ptr, repo.get(), &oid) != 0) {
@@ -259,13 +319,13 @@ Result<HistoryResult> query(const RepositorySpec& spec,
                 rec.message.pop_back();
         }
 
-        // --- Validate parentIndex ---
+        // --- Select parent for diff ---
         TreeHandle parentTree;
         std::optional<std::string> parentOidStr;
 
         if (parentCount == 0) {
-            // Root commit must have parentIndex 0; anything else is an error
-            if (request.parentIndex != 0) {
+            // Root commit: if explicitly queried as startOid with parentIndex > 0, reject
+            if (!request.startOid.empty() && request.startOid == rec.oid && request.parentIndex != 0) {
                 return xray::Error{
                     xray::ErrorCode::invalid_input,
                     "Root commit has no parents (parentIndex must be 0)",
@@ -275,17 +335,25 @@ Result<HistoryResult> query(const RepositorySpec& spec,
             }
             // Root commit compares against an empty tree (parentTree remains null)
         } else {
-            if (request.parentIndex >= parentCount) {
-                return xray::Error{
-                    xray::ErrorCode::invalid_input,
-                    "Invalid parentIndex " + std::to_string(request.parentIndex) +
-                    " for commit " + rec.oid + " (commit has " + std::to_string(parentCount) + " parents)",
-                    std::nullopt,
-                    rec.oid
-                };
+            unsigned int actualParentIndex = 0;
+            if (parentCount > 1) {
+                // Merge commit: use requested parentIndex (validated against parentCount)
+                if (request.parentIndex >= parentCount) {
+                    return xray::Error{
+                        xray::ErrorCode::invalid_input,
+                        "Invalid parentIndex " + std::to_string(request.parentIndex) +
+                        " for merge commit " + rec.oid + " (commit has " + std::to_string(parentCount) + " parents)",
+                        std::nullopt,
+                        rec.oid
+                    };
+                }
+                actualParentIndex = static_cast<unsigned int>(request.parentIndex);
+            } else {
+                // Non-merge commit: always diff against its single parent (index 0)
+                actualParentIndex = 0;
             }
 
-            const git_oid* pOid = git_commit_parent_id(commit.get(), static_cast<unsigned>(request.parentIndex));
+            const git_oid* pOid = git_commit_parent_id(commit.get(), actualParentIndex);
             if (!pOid) {
                 return makeGitError("Failed to get parent ID for commit " + rec.oid,
                                     xray::ErrorCode::read_error);
@@ -311,18 +379,6 @@ Result<HistoryResult> query(const RepositorySpec& spec,
         }
 
         // --- Build Diff with Pathspec ---
-        std::string filterPath;
-        const char* pathSpec[1] = { nullptr };
-        git_diff_options diffOpts = GIT_DIFF_OPTIONS_INIT;
-        diffOpts.flags = GIT_DIFF_INCLUDE_TYPECHANGE;
-
-        if (request.relativePath.has_value()) {
-            filterPath = *request.relativePath;
-            pathSpec[0] = filterPath.c_str();
-            diffOpts.pathspec.strings = const_cast<char**>(pathSpec);
-            diffOpts.pathspec.count   = 1;
-        }
-
         DiffHandle diff;
         if (git_diff_tree_to_tree(&diff.ptr, repo.get(),
                                   parentTree.get(), commitTree.get(),
@@ -336,19 +392,94 @@ Result<HistoryResult> query(const RepositorySpec& spec,
         findOpts.flags = GIT_DIFF_FIND_RENAMES;
         git_diff_find_similar(diff.get(), &findOpts);
 
+        // Check if diff contains changes matching exact relativePath
+        std::size_t matchingDeltas = 0;
         const std::size_t numDeltas = git_diff_num_deltas(diff.get());
+        for (std::size_t i = 0; i < numDeltas; ++i) {
+            const git_diff_delta* d = git_diff_get_delta(diff.get(), i);
+            if (!d) continue;
+            if (request.relativePath.has_value()) {
+                const char* oldP = d->old_file.path;
+                const char* newP = d->new_file.path;
+                if ((newP && filterPath == newP) || (oldP && filterPath == oldP)) {
+                    ++matchingDeltas;
+                }
+            } else {
+                ++matchingDeltas;
+            }
+        }
 
-        // If path filtering was requested and this commit did not touch the path,
-        // do not include it in results and do not consume limit.
-        if (request.relativePath.has_value() && numDeltas == 0) {
+        // If filtering by relativePath and this commit did not touch it, skip
+        if (request.relativePath.has_value() && matchingDeltas == 0) {
             continue;
         }
 
-        collectChanges(diff.get(), rec.oid, parentOidStr, result.changes);
+        // Check limit threshold
+        if (seen >= request.limit) {
+            if (!request.relativePath.has_value()) {
+                result.hasMore = true;
+                break;
+            }
+
+            // For relativePath queries, look ahead to see if any older commit
+            // actually modifies the requested path before setting hasMore = true.
+            bool foundMore = true; // current commit already matched and exceeds limit
+            result.hasMore = foundMore;
+            break;
+        }
+
+        collectChanges(diff.get(), rec.oid, parentOidStr,
+                       request.relativePath.has_value() ? std::optional<std::string>{filterPath} : std::nullopt,
+                       result.changes);
 
         ctx.report("Reading commits", seen, std::nullopt);
         result.commits.push_back(std::move(rec));
         ++seen;
+    }
+
+    // If we filled exactly request.limit commits for relativePath, check if there's any
+    // older commit down the revwalk that touches the path to correctly set hasMore.
+    if (request.relativePath.has_value() && seen == request.limit && !result.hasMore && walkRc == 0) {
+        git_oid lookaheadOid{};
+        while (git_revwalk_next(&lookaheadOid, walker.get()) == 0) {
+            if (ctx.isCancelled()) return xray::Cancelled{};
+            CommitHandle laCommit;
+            if (git_commit_lookup(&laCommit.ptr, repo.get(), &lookaheadOid) != 0) continue;
+            TreeHandle laCommitTree;
+            if (git_commit_tree(&laCommitTree.ptr, laCommit.get()) != 0) continue;
+
+            TreeHandle laParentTree;
+            const unsigned int laPCount = git_commit_parentcount(laCommit.get());
+            if (laPCount > 0) {
+                const git_oid* laPOid = git_commit_parent_id(laCommit.get(), 0);
+                CommitHandle laPCommit;
+                if (laPOid && git_commit_lookup(&laPCommit.ptr, repo.get(), laPOid) == 0) {
+                    git_commit_tree(&laParentTree.ptr, laPCommit.get());
+                }
+            }
+
+            DiffHandle laDiff;
+            if (git_diff_tree_to_tree(&laDiff.ptr, repo.get(),
+                                      laParentTree.get(), laCommitTree.get(),
+                                      &diffOpts) == 0 && laDiff) {
+                git_diff_find_options fOpts = GIT_DIFF_FIND_OPTIONS_INIT;
+                fOpts.flags = GIT_DIFF_FIND_RENAMES;
+                git_diff_find_similar(laDiff.get(), &fOpts);
+
+                const std::size_t n = git_diff_num_deltas(laDiff.get());
+                for (std::size_t i = 0; i < n; ++i) {
+                    const git_diff_delta* d = git_diff_get_delta(laDiff.get(), i);
+                    if (!d) continue;
+                    const char* oldP = d->old_file.path;
+                    const char* newP = d->new_file.path;
+                    if ((newP && filterPath == newP) || (oldP && filterPath == oldP)) {
+                        result.hasMore = true;
+                        break;
+                    }
+                }
+            }
+            if (result.hasMore) break;
+        }
     }
 
     if (walkRc != 0 && walkRc != GIT_ITEROVER) {
@@ -408,7 +539,7 @@ Result<code::SourceSnapshot> loadSnapshot(const RepositorySpec& spec,
 
     WalkState state{ repo.get(), selection, snapshot, ctx };
 
-    git_tree_walk(
+    const int walkRes = git_tree_walk(
         tree.get(),
         GIT_TREEWALK_PRE,
         [](const char* root, const git_tree_entry* entry, void* payload) -> int {
@@ -420,8 +551,8 @@ Result<code::SourceSnapshot> loadSnapshot(const RepositorySpec& spec,
 
             const std::string relPath = std::string(root ? root : "") + name;
 
-            // 1. If path does not match selection filters, silently skip (normal filtering).
-            // This is NOT an error and does NOT contribute to skippedElements or partial coverage.
+            // 1. If path does not match selection filters (including nested excluded directories),
+            // silently skip. Normal selection filtering does NOT count as a skipped error.
             if (!pathMatchesSelection(relPath, s.sel)) {
                 return 0;
             }
@@ -481,16 +612,13 @@ Result<code::SourceSnapshot> loadSnapshot(const RepositorySpec& spec,
             const char* rawData = static_cast<const char*>(git_blob_rawcontent(blob.get()));
             const git_object_size_t rawSize = git_blob_rawsize(blob.get());
 
-            // Check for embedded NUL bytes in non-empty files
+            // Validate UTF-8 encoding (reject non-UTF8 such as Windows-1251 or corrupt bytes)
             if (rawData && rawSize > 0) {
-                const char* nullPos = static_cast<const char*>(
-                    std::memchr(rawData, '\0', static_cast<std::size_t>(rawSize))
-                );
-                if (nullPos != nullptr) {
+                if (!isValidUtf8(rawData, static_cast<std::size_t>(rawSize))) {
                     xray::Error diag;
                     diag.code = xray::ErrorCode::unsupported_encoding;
                     diag.path = relPath;
-                    diag.message = "Binary or null-containing file skipped: " + relPath;
+                    diag.message = "Unsupported encoding (non-UTF-8) skipped: " + relPath;
                     s.diagnostics.push_back(std::move(diag));
                     ++s.skippedElements;
                     return 0;
@@ -517,6 +645,11 @@ Result<code::SourceSnapshot> loadSnapshot(const RepositorySpec& spec,
     );
 
     if (state.cancelled) return xray::Cancelled{};
+
+    // Check if git_tree_walk encountered an error
+    if (walkRes != 0) {
+        return makeGitError("git_tree_walk failed for commit: " + oid, xray::ErrorCode::read_error);
+    }
 
     if (state.skippedElements > 0) {
         snapshot.coverage.completeness    = xray::Completeness::partial;
