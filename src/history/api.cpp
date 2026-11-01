@@ -194,16 +194,32 @@ void collectChanges(git_diff* diff,
         rec.parentOid = parentOid;
         rec.status    = *maybeStatus;
         rec.isBinary  = (delta->flags & GIT_DIFF_FLAG_BINARY) != 0;
+        rec.isSymlink = (delta->old_file.mode == GIT_FILEMODE_LINK || delta->new_file.mode == GIT_FILEMODE_LINK);
+        rec.isSubmodule = (delta->old_file.mode == GIT_FILEMODE_COMMIT || delta->new_file.mode == GIT_FILEMODE_COMMIT);
 
         if (oldP && oldP[0]) rec.oldPath = oldP;
         if (newP && newP[0]) rec.newPath = newP;
 
         PatchHandle patch;
         if (git_patch_from_diff(&patch.ptr, diff, i) == 0 && patch) {
-            std::size_t added = 0, deleted = 0, ctx = 0;
-            git_patch_line_stats(&ctx, &added, &deleted, patch.get());
-            rec.addedLines   = added;
-            rec.deletedLines = deleted;
+            // Re-read binary flag AFTER patch is generated: libgit2 sets
+            // GIT_DIFF_FLAG_BINARY only once the patch content is materialised.
+            const git_diff_delta* patchDelta = git_patch_get_delta(patch.get());
+            if (patchDelta) {
+                rec.isBinary = (patchDelta->flags & GIT_DIFF_FLAG_BINARY) != 0;
+                if (patchDelta->old_file.mode == GIT_FILEMODE_LINK || patchDelta->new_file.mode == GIT_FILEMODE_LINK) {
+                    rec.isSymlink = true;
+                }
+                if (patchDelta->old_file.mode == GIT_FILEMODE_COMMIT || patchDelta->new_file.mode == GIT_FILEMODE_COMMIT) {
+                    rec.isSubmodule = true;
+                }
+            }
+            if (!rec.isBinary && !rec.isSubmodule) {
+                std::size_t added = 0, deleted = 0, context = 0;
+                git_patch_line_stats(&context, &added, &deleted, patch.get());
+                rec.addedLines   = added;
+                rec.deletedLines = deleted;
+            }
         }
         out.push_back(std::move(rec));
     }
@@ -285,8 +301,11 @@ Result<HistoryResult> query(const RepositorySpec& spec,
         diffOpts.flags |= GIT_DIFF_DISABLE_PATHSPEC_MATCH;
     }
 
+    std::size_t revwalkIndex = 0;
     while ((walkRc = git_revwalk_next(&oid, walker.get())) == 0) {
         if (ctx.isCancelled()) return xray::Cancelled{};
+
+        const bool isStartCommit = (revwalkIndex++ == 0);
 
         CommitHandle commit;
         if (git_commit_lookup(&commit.ptr, repo.get(), &oid) != 0) {
@@ -324,8 +343,8 @@ Result<HistoryResult> query(const RepositorySpec& spec,
         std::optional<std::string> parentOidStr;
 
         if (parentCount == 0) {
-            // Root commit: if explicitly queried as startOid with parentIndex > 0, reject
-            if (!request.startOid.empty() && request.startOid == rec.oid && request.parentIndex != 0) {
+            // Root commit: if queried as start commit with parentIndex > 0, reject
+            if (isStartCommit && request.parentIndex != 0) {
                 return xray::Error{
                     xray::ErrorCode::invalid_input,
                     "Root commit has no parents (parentIndex must be 0)",
@@ -336,20 +355,34 @@ Result<HistoryResult> query(const RepositorySpec& spec,
             // Root commit compares against an empty tree (parentTree remains null)
         } else {
             unsigned int actualParentIndex = 0;
-            if (parentCount > 1) {
-                // Merge commit: use requested parentIndex (validated against parentCount)
-                if (request.parentIndex >= parentCount) {
-                    return xray::Error{
-                        xray::ErrorCode::invalid_input,
-                        "Invalid parentIndex " + std::to_string(request.parentIndex) +
-                        " for merge commit " + rec.oid + " (commit has " + std::to_string(parentCount) + " parents)",
-                        std::nullopt,
-                        rec.oid
-                    };
+            if (isStartCommit) {
+                if (parentCount > 1) {
+                    // Merge commit: use requested parentIndex (validated against parentCount)
+                    if (request.parentIndex >= parentCount) {
+                        return xray::Error{
+                            xray::ErrorCode::invalid_input,
+                            "Invalid parentIndex " + std::to_string(request.parentIndex) +
+                            " for merge commit " + rec.oid + " (commit has " + std::to_string(parentCount) + " parents)",
+                            std::nullopt,
+                            rec.oid
+                        };
+                    }
+                    actualParentIndex = static_cast<unsigned int>(request.parentIndex);
+                } else {
+                    // Single-parent commit: parentIndex must be 0
+                    if (request.parentIndex != 0) {
+                        return xray::Error{
+                            xray::ErrorCode::invalid_input,
+                            "Invalid parentIndex " + std::to_string(request.parentIndex) +
+                            " for single-parent commit " + rec.oid + " (commit has 1 parent)",
+                            std::nullopt,
+                            rec.oid
+                        };
+                    }
+                    actualParentIndex = 0;
                 }
-                actualParentIndex = static_cast<unsigned int>(request.parentIndex);
             } else {
-                // Non-merge commit: always diff against its single parent (index 0)
+                // Subsequent commits in history traversal always follow first parent (index 0)
                 actualParentIndex = 0;
             }
 
