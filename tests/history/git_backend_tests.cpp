@@ -255,6 +255,11 @@ struct TestGitRepo {
             git_treebuilder_write(&assetsTreeOid, bld.get());
         }
 
+        // Symlink: points to "src/main.cpp"
+        const char symlinkTarget[] = "src/main.cpp";
+        git_oid symlinkBlob{};
+        git_blob_create_from_buffer(&symlinkBlob, repo.get(), symlinkTarget, sizeof(symlinkTarget) - 1);
+
         git_oid treeOidExtra{};
         {
             TTreeBldHandle bld;
@@ -263,6 +268,8 @@ struct TestGitRepo {
             git_treebuilder_insert(nullptr, bld.get(), "docs", &docsTreeOid, GIT_FILEMODE_TREE);
             git_treebuilder_insert(nullptr, bld.get(), "feature.cpp", &featBlob, GIT_FILEMODE_BLOB);
             git_treebuilder_insert(nullptr, bld.get(), "assets", &assetsTreeOid, GIT_FILEMODE_TREE);
+            git_treebuilder_insert(nullptr, bld.get(), "link_main", &symlinkBlob, GIT_FILEMODE_LINK);
+            git_treebuilder_insert(nullptr, bld.get(), "submod", &featOid, GIT_FILEMODE_COMMIT);
             git_treebuilder_write(&treeOidExtra, bld.get());
         }
 
@@ -552,6 +559,244 @@ void testCancellation(const TestGitRepo& fixture) {
     check(std::holds_alternative<xray::Cancelled>(snapRes), "cancelled loadSnapshot returns Cancelled");
 }
 
+// 10. Test that empty file (0 bytes) is included in snapshot with complete coverage
+void testEmptyFileInSnapshot(const TestGitRepo& fixture) {
+    std::cout << "--- testEmptyFileInSnapshot ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+    xray::code::FileSelection sel;
+    // Clear default extension filter so that empty.txt (.txt) is visited
+    sel.extensions.clear();
+    sel.excludedDirectories.clear();
+
+    auto res = xray::history::loadSnapshot(spec, fixture.rootCommitOid, sel, ctx);
+    check(std::holds_alternative<xray::code::SourceSnapshot>(res), "loadSnapshot succeeded");
+    if (!std::holds_alternative<xray::code::SourceSnapshot>(res)) return;
+
+    const auto& snap = std::get<xray::code::SourceSnapshot>(res);
+    bool foundEmpty = false;
+    for (const auto& f : snap.files) {
+        if (f.relativePath == "empty.txt") {
+            foundEmpty = true;
+            check(f.bytes && f.bytes->empty(), "empty.txt has 0 bytes");
+        }
+    }
+    check(foundEmpty, "empty.txt present in snapshot files");
+    check(snap.coverage.completeness == xray::Completeness::complete,
+          "coverage is complete for empty file (0 bytes is valid text)");
+}
+
+// 11. Test that binary file in snapshot is skipped with unsupported_encoding diagnostic
+void testBinaryFileInSnapshot(const TestGitRepo& fixture) {
+    std::cout << "--- testBinaryFileInSnapshot ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+    xray::code::FileSelection sel;
+    // Clear extension filter so .bin files are visited and detected as binary
+    sel.extensions.clear();
+    sel.excludedDirectories.clear();
+    // Limit scope to assets/ directory which has binary.bin and win1251.cpp
+    sel.relativePaths = { "assets" };
+
+    auto res = xray::history::loadSnapshot(spec, fixture.extraCommitOid, sel, ctx);
+    check(std::holds_alternative<xray::code::SourceSnapshot>(res), "loadSnapshot succeeded");
+    if (!std::holds_alternative<xray::code::SourceSnapshot>(res)) return;
+
+    const auto& snap = std::get<xray::code::SourceSnapshot>(res);
+    check(snap.coverage.completeness == xray::Completeness::partial,
+          "coverage is partial because binary/non-utf8 files were skipped");
+    check(snap.coverage.skippedElements >= 1, "at least 1 element skipped");
+    bool foundBinaryDiag = false;
+    for (const auto& d : snap.coverage.diagnostics) {
+        if (d.code == xray::ErrorCode::unsupported_encoding &&
+            d.path.has_value() && *d.path == "assets/binary.bin") {
+            foundBinaryDiag = true;
+        }
+    }
+    check(foundBinaryDiag, "unsupported_encoding diagnostic recorded for binary.bin");
+    bool foundBinaryFile = false;
+    for (const auto& f : snap.files) {
+        if (f.relativePath == "assets/binary.bin") foundBinaryFile = true;
+    }
+    check(!foundBinaryFile, "binary.bin NOT in snapshot files");
+}
+
+// 12. Test that loadSnapshot with non-existent OID returns not_found
+void testInvalidOidLoadSnapshot(const TestGitRepo& fixture) {
+    std::cout << "--- testInvalidOidLoadSnapshot ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+    xray::code::FileSelection sel;
+    const std::string bogusOid = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+
+    auto res = xray::history::loadSnapshot(spec, bogusOid, sel, ctx);
+    check(std::holds_alternative<xray::Error>(res), "non-existent OID returns Error");
+    if (std::holds_alternative<xray::Error>(res)) {
+        check(std::get<xray::Error>(res).code == xray::ErrorCode::not_found,
+              "error code is not_found");
+    }
+}
+
+// 13. Test that binary diff in query is flagged isBinary=true with zero line counts
+void testBinaryChangeIsBinary(const TestGitRepo& fixture) {
+    std::cout << "--- testBinaryChangeIsBinary ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+    xray::history::HistoryRequest req;
+    req.startOid = fixture.extraCommitOid;
+    req.relativePath = "assets/binary.bin";
+    req.limit = 5;
+
+    auto res = xray::history::query(spec, req, ctx);
+    check(std::holds_alternative<xray::history::HistoryResult>(res), "query for binary.bin succeeded");
+    if (!std::holds_alternative<xray::history::HistoryResult>(res)) return;
+
+    const auto& hist = std::get<xray::history::HistoryResult>(res);
+    check(!hist.changes.empty(), "changes found for binary.bin");
+    bool foundBinaryChange = false;
+    for (const auto& ch : hist.changes) {
+        if ((ch.newPath.has_value() && *ch.newPath == "assets/binary.bin") ||
+            (ch.oldPath.has_value() && *ch.oldPath == "assets/binary.bin")) {
+            check(ch.isBinary, "change flagged as isBinary=true");
+            // For binary changes addedLines/deletedLines must be absent (nullopt)
+            check(!ch.addedLines.has_value(), "addedLines is nullopt for binary change");
+            check(!ch.deletedLines.has_value(), "deletedLines is nullopt for binary change");
+            foundBinaryChange = true;
+        }
+    }
+    check(foundBinaryChange, "binary.bin change record found");
+}
+
+// 14. Test that single-parent commit with non-zero parentIndex returns invalid_input
+void testParentIndexInvalidForSingleParent(const TestGitRepo& fixture) {
+    std::cout << "--- testParentIndexInvalidForSingleParent ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+
+    xray::history::HistoryRequest req;
+    req.startOid = fixture.commit2Oid; // single-parent commit
+    req.limit = 1;
+    req.parentIndex = 5; // invalid for a commit with 1 parent
+
+    auto res = xray::history::query(spec, req, ctx);
+    check(std::holds_alternative<xray::Error>(res),
+          "single-parent commit with parentIndex=5 rejected as Error");
+    if (std::holds_alternative<xray::Error>(res)) {
+        check(std::get<xray::Error>(res).code == xray::ErrorCode::invalid_input,
+              "error code is invalid_input");
+    }
+}
+
+// 15. Test that querying HEAD with non-zero parentIndex when HEAD has 1 parent returns invalid_input
+void testParentIndexInvalidForHead(const TestGitRepo& fixture) {
+    std::cout << "--- testParentIndexInvalidForHead ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+
+    // HEAD in fixture is extraCommit (1 parent)
+    {
+        xray::history::HistoryRequest req;
+        req.startOid = ""; // default to HEAD
+        req.limit = 1;
+        req.parentIndex = 1; // invalid for HEAD with 1 parent
+
+        auto res = xray::history::query(spec, req, ctx);
+        check(std::holds_alternative<xray::Error>(res),
+              "HEAD (1 parent) with parentIndex=1 rejected as Error");
+        if (std::holds_alternative<xray::Error>(res)) {
+            check(std::get<xray::Error>(res).code == xray::ErrorCode::invalid_input,
+                  "error code is invalid_input");
+        }
+    }
+
+    {
+        xray::history::HistoryRequest req;
+        req.startOid = ""; // default to HEAD
+        req.limit = 1;
+        req.parentIndex = 0; // valid for HEAD
+
+        auto res = xray::history::query(spec, req, ctx);
+        check(std::holds_alternative<xray::history::HistoryResult>(res),
+              "HEAD with parentIndex=0 succeeded");
+    }
+}
+
+// 16. Test that symlink and submodule entries have isSymlink and isSubmodule set in ChangeRecord
+void testSymlinkAndSubmoduleChanges(const TestGitRepo& fixture) {
+    std::cout << "--- testSymlinkAndSubmoduleChanges ---\n";
+    xray::JobContext ctx;
+    xray::history::RepositorySpec spec{ fixture.repoPath };
+
+    xray::history::HistoryRequest req;
+    req.startOid = fixture.extraCommitOid;
+    req.limit = 1;
+
+    auto res = xray::history::query(spec, req, ctx);
+    check(std::holds_alternative<xray::history::HistoryResult>(res), "query succeeded");
+    if (!std::holds_alternative<xray::history::HistoryResult>(res)) return;
+
+    const auto& hist = std::get<xray::history::HistoryResult>(res);
+    bool foundSymlink = false;
+    bool foundSubmodule = false;
+
+    for (const auto& ch : hist.changes) {
+        if (ch.newPath.has_value() && *ch.newPath == "link_main") {
+            foundSymlink = true;
+            check(ch.isSymlink, "link_main has isSymlink=true");
+            check(!ch.isSubmodule, "link_main has isSubmodule=false");
+        }
+        if (ch.newPath.has_value() && *ch.newPath == "submod") {
+            foundSubmodule = true;
+            check(ch.isSubmodule, "submod has isSubmodule=true");
+            check(!ch.isSymlink, "submod has isSymlink=false");
+        }
+    }
+
+    check(foundSymlink, "link_main change record found");
+    check(foundSubmodule, "submod change record found");
+
+    // Also verify loadSnapshot diagnoses them properly
+    {
+        xray::code::FileSelection sel;
+        sel.relativePaths = { "link_main" };
+        sel.extensions.clear();
+        sel.excludedDirectories.clear();
+        auto snapRes = xray::history::loadSnapshot(spec, fixture.extraCommitOid, sel, ctx);
+        check(std::holds_alternative<xray::code::SourceSnapshot>(snapRes), "loadSnapshot for symlink returned snapshot");
+        if (std::holds_alternative<xray::code::SourceSnapshot>(snapRes)) {
+            const auto& snap = std::get<xray::code::SourceSnapshot>(snapRes);
+            check(snap.coverage.skippedElements >= 1, "symlink skipped in snapshot");
+            bool diagFound = false;
+            for (const auto& d : snap.coverage.diagnostics) {
+                if (d.path.has_value() && *d.path == "link_main" && d.code == xray::ErrorCode::invalid_input) {
+                    diagFound = true;
+                }
+            }
+            check(diagFound, "diagnostic recorded for symlink");
+        }
+    }
+
+    {
+        xray::code::FileSelection sel;
+        sel.relativePaths = { "submod" };
+        sel.extensions.clear();
+        sel.excludedDirectories.clear();
+        auto snapRes = xray::history::loadSnapshot(spec, fixture.extraCommitOid, sel, ctx);
+        check(std::holds_alternative<xray::code::SourceSnapshot>(snapRes), "loadSnapshot for submodule returned snapshot");
+        if (std::holds_alternative<xray::code::SourceSnapshot>(snapRes)) {
+            const auto& snap = std::get<xray::code::SourceSnapshot>(snapRes);
+            check(snap.coverage.skippedElements >= 1, "submodule skipped in snapshot");
+            bool diagFound = false;
+            for (const auto& d : snap.coverage.diagnostics) {
+                if (d.path.has_value() && *d.path == "submod" && d.code == xray::ErrorCode::invalid_input) {
+                    diagFound = true;
+                }
+            }
+            check(diagFound, "diagnostic recorded for submodule");
+        }
+    }
+}
+
 } // namespace
 
 int main() {
@@ -569,6 +814,13 @@ int main() {
         testNonUtf8EncodingDetection(fixture);
         testParentIndexValidation(fixture);
         testCancellation(fixture);
+        testEmptyFileInSnapshot(fixture);
+        testBinaryFileInSnapshot(fixture);
+        testInvalidOidLoadSnapshot(fixture);
+        testBinaryChangeIsBinary(fixture);
+        testParentIndexInvalidForSingleParent(fixture);
+        testParentIndexInvalidForHead(fixture);
+        testSymlinkAndSubmoduleChanges(fixture);
 
         std::cout << "\n========================================\n";
         std::cout << "Summary: " << gPass << " passed, " << gFail << " failed.\n";
