@@ -1,4 +1,5 @@
 #include "app/main_window.hpp"
+#include "app/coordinator.hpp"
 #include "ui/code/source_page.hpp"
 #include "ui/code/file_selection_page.hpp"
 #include "ui/code/diagnostics_page.hpp"
@@ -214,6 +215,14 @@ int main(int argc, char** argv) {
         waitFor([&] { return start->isEnabled(); });
         require(message->text().startsWith(QString::fromUtf8("Готово")) && tree->topLevelItemCount() == 1,
             "Background scanning must parse only selected files and restore controls");
+        const auto propagatedSelection = window.coordinator()->fileSelection();
+        require(propagatedSelection.relativePaths.size() == 1
+            && propagatedSelection.relativePaths.front()
+                == QString::fromUtf8("src/привіт.cpp").toUtf8().toStdString(),
+            "Git analysis must reuse files selected on the source page");
+        require(!propagatedSelection.extensions.empty()
+            && !propagatedSelection.excludedDirectories.empty(),
+            "Git selection must carry extensions and exclusions together with selected paths");
         const auto previousFile = tree->topLevelItem(0)->text(0);
         child<QPushButton>(*source, "sourceOpenStructure")->click();
         require(navigation->currentRow() == 2, "Open structure must synchronize navigation");
@@ -255,6 +264,22 @@ int main(int argc, char** argv) {
         require(filterPage->isEnabled() && tree->topLevelItemCount() == 1
             && tree->topLevelItem(0)->text(0).contains("keep.cpp"),
             "Background scan must apply extensions and directory exclusions");
+
+        source->addFiles({filterFixture.path() + "/keep.cpp"});
+        start->click();
+        waitFor([&] { return start->isEnabled(); });
+        const auto filteredSelection = window.coordinator()->fileSelection();
+        bool hasGenerated = false;
+        for (const auto& directory : filteredSelection.excludedDirectories) {
+            if (directory == "generated") hasGenerated = true;
+        }
+        require(filteredSelection.relativePaths.size() == 1
+            && filteredSelection.relativePaths.front() == "keep.cpp"
+            && filteredSelection.extensions == std::vector<std::string>{".cpp"}
+            && hasGenerated,
+            "Git selection must combine chosen paths with configured extensions and exclusions");
+
+        source->setDirectory(filterFixture.path());
         windowExtensions->setText(".cpp, .cc, .cxx, .h, .hpp, .hxx");
         delete windowExclusions->takeItem(windowExclusions->count() - 1);
 

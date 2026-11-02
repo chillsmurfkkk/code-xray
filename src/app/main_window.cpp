@@ -367,6 +367,13 @@ void MainWindow::loadDirectory(const QString& directory) {
 }
 
 bool MainWindow::resolveFileSelection(code::FileSelection& selection) {
+    // Git operations must analyse the same subset of files as the source page:
+    // keep the user-selected relative paths and only fill in the filters.
+    const auto sourceSelection = source_->sourceRequest().selection;
+    if (selection.relativePaths.empty()) {
+        selection.relativePaths = sourceSelection.relativePaths;
+    }
+
     QString selectionError;
     if (!fileSelection_->applyTo(selection, selectionError)) {
         QMessageBox::warning(
@@ -384,6 +391,12 @@ void MainWindow::loadSource(code::SourceRequest request) {
 
     if (!resolveFileSelection(request.selection)) {
         return;
+    }
+
+    // Keep the coordinator in sync with the exact scan selection so later Git
+    // operations (compare, trend, commit snapshot) reuse the same paths.
+    if (coordinator_) {
+        coordinator_->setFileSelection(request.selection);
     }
 
     sourceStop_ = std::stop_source{};
