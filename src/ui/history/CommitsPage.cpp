@@ -222,6 +222,9 @@ void CommitsPage::setCommits(const std::vector<xray::history::CommitRecord>& com
     if (demoBadge_) {
         demoBadge_->setVisible(isDemo_);
     }
+    // Clear previously selected base and target commit OIDs when new commits / repository is loaded
+    setBaseCommitOid(QString{});
+    setTargetCommitOid(QString{});
     onSelectionChanged();
 }
 
