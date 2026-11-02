@@ -1,9 +1,11 @@
 #include "code/api.hpp"
 #include "ui/code/demo_snapshot.hpp"
 #include "ui/code/structure_page.hpp"
+#include "ui/code/diagnostics_page.hpp"
 #include "ui/shared/theme.hpp"
 #include "ui/shared/popup_style.hpp"
 
+#include <QTableWidget>
 #include <QApplication>
 #include <QComboBox>
 #include <QDir>
@@ -174,6 +176,29 @@ int main(int argc, char* argv[]) {
         writeFile(directory.path() + "/src/other.cpp", "int first() { return 9; }\n");
         writeFile(directory.path() + "/src/empty.cpp", {});
 
+        auto gitSource = std::make_shared<code::SourceSnapshot>();
+        gitSource->id = "test-git-snapshot";
+        gitSource->kind = code::SourceKind::git;
+        gitSource->commitOid = "test-commit";
+        gitSource->files.push_back({
+            "src/history.cpp",
+            std::make_shared<const std::string>("int from_commit() { return 42; }\n"),
+            "test-content"
+        });
+
+        const JobContext gitContext;
+        auto gitResult = code::parse(gitSource, code::ParseOptions{}, gitContext);
+
+        require(std::holds_alternative<code::ParsedSnapshot>(gitResult),
+                "Git snapshot must be parsed");
+        const auto& gitParsed = std::get<code::ParsedSnapshot>(gitResult);
+        require(gitParsed.source == gitSource,
+                "Parsed snapshot must retain the source supplied by C");
+        require(gitParsed.units.size() == 1
+                    && gitParsed.units.front().functions.size() == 1
+                    && gitParsed.units.front().functions.front()->name == "from_commit",
+                "Parser must extract the function from Git snapshot bytes");
+
         auto result = std::async(std::launch::async, [&] {
             const auto rootBytes = directory.path().toUtf8();
             code::SourceRequest request;
@@ -205,6 +230,57 @@ int main(int argc, char* argv[]) {
         auto* cancelButton = page.findChild<QPushButton*>("cancelSourceButton");
         require(tree && editor && sourcePath && context && content && openButton && cancelButton,
                 "Missing snapshot widgets");
+
+        // На диску інший вміст, ніж у вибраному Git-знімку.
+        writeFile(directory.path() + "/src/history.cpp",
+                  "int from_working_file() { return 0; }\n");
+
+        auto gitParsedForView = std::make_shared<const code::ParsedSnapshot>(
+            std::move(std::get<code::ParsedSnapshot>(gitResult))
+        );
+
+        page.setSnapshot(gitParsedForView);
+        auto* gitFile = findFile(*tree, "src/history.cpp");
+        require(gitFile != nullptr, "Git snapshot file must appear in the tree");
+
+        auto* gitFunction = findFunction(gitFile, "from_commit");
+        require(gitFunction != nullptr, "Git snapshot function must appear in the tree");
+
+        tree->setCurrentItem(gitFunction);
+        app.processEvents();
+
+        require(editor->toPlainText() == "int from_commit() { return 42; }\n",
+                "Viewer must display Git snapshot bytes, not the working file");
+        require(!editor->extraSelections().isEmpty(),
+                "Selecting a Git snapshot function must highlight its range");
+
+        auto partialSource = std::make_shared<code::SourceSnapshot>(*gitSource);
+        partialSource->files.push_back({
+            "src/broken.cpp",
+            std::make_shared<const std::string>("int broken( {\n"),
+            "broken-content"
+        });
+
+        auto partialResult = code::parse(partialSource, code::ParseOptions{}, gitContext);
+        require(std::holds_alternative<code::ParsedSnapshot>(partialResult),
+                "A syntax error must still produce a parsed snapshot");
+
+        auto partialForView = std::make_shared<const code::ParsedSnapshot>(
+            std::move(std::get<code::ParsedSnapshot>(partialResult))
+        );
+        require(partialForView->coverage.completeness == Completeness::partial,
+                "A syntax error must mark the result as partial");
+
+        page.setSnapshot(partialForView);
+        auto* validFile = findFile(*tree, "src/history.cpp");
+        require(findFunction(validFile, "from_commit") != nullptr,
+                "A partial result must keep successfully parsed functions");
+
+        DiagnosticsPage diagnostics;
+        diagnostics.setSnapshot(partialForView);
+        auto* table = diagnostics.findChild<QTableWidget*>("diagnosticsTable");
+        require(table && table->rowCount() > 0,
+                "Diagnostics must show the syntax error");
 
         page.setSnapshot(parsed);
         app.processEvents();
