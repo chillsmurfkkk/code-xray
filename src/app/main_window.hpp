@@ -32,12 +32,15 @@ class AncestryPage;
 
 namespace xray::app {
 class AnalysisController;
+class Coordinator;
 
 class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(ui::Theme theme, QWidget* parent = nullptr);
     ~MainWindow() override;
     void setSnapshot(std::shared_ptr<const code::ParsedSnapshot> snapshot, bool demonstration = false);
+
+    Coordinator* coordinator() const { return coordinator_; }
 
 private:
     ui::Theme theme_;
@@ -56,6 +59,7 @@ private:
     ui::FileSelectionPage* fileSelection_ = nullptr;
     ui::DiagnosticsPage* diagnostics_ = nullptr;
     AnalysisController* analysisController_ = nullptr;
+    Coordinator* coordinator_ = nullptr;
     ui::analysis_pages::Workspace* analysisPages_ = nullptr;
     ui::review::ComparisonPage* comparisonPage_ = nullptr;
     ui::review::TrendPage* trendPage_ = nullptr;

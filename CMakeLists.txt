@@ -183,6 +183,7 @@ if(CODE_XRAY_BUILD_APP)
     # Shared GUI components can be reused by the app and its behavior checks.
     add_library(xray_ui STATIC
         src/app/analysis_controller.cpp src/app/analysis_controller.hpp
+        src/app/coordinator.cpp src/app/coordinator.hpp
         src/ui/analysis/session.cpp src/ui/analysis/session.hpp
         src/ui/analysis/profiles_page.cpp src/ui/analysis/profiles_page.hpp
         src/ui/analysis/metrics_page.cpp src/ui/analysis/metrics_page.hpp
@@ -257,6 +258,12 @@ if(CODE_XRAY_BUILD_APP)
         target_link_libraries(history_ui_tests PRIVATE xray_ui xray_history xray_code Qt6::Test)
         add_test(NAME history_ui COMMAND history_ui_tests)
         set_tests_properties(history_ui PROPERTIES TIMEOUT 30)
+
+        add_executable(coordinator_tests tests/app/coordinator_tests.cpp)
+        set_target_properties(coordinator_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(coordinator_tests PRIVATE xray_ui xray_history xray_code xray_analysis xray_review libgit2::libgit2package Qt6::Test)
+        add_test(NAME coordinator COMMAND coordinator_tests)
+        set_tests_properties(coordinator PROPERTIES TIMEOUT 60)
 
         add_executable(gui_design_tests tests/ui/design_tests.cpp src/app/main_window.cpp)
         target_link_libraries(gui_design_tests PRIVATE xray_ui xray_code)

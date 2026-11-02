@@ -103,3 +103,5 @@ Codex завершив діагностику; самостійне авторс
 [Перелік A](contributions/A.md), [поведінка й перевірки](gui-source.md).
 
 ЛР3 C: libgit2-бекенд для читання реальних Git-репозиторіїв, first-parent обхід, ізольована тестова фікстура, ретроспектива [kostukoleksandr.md](retrospectives/kostukoleksandr.md). [api.cpp](../src/history/api.cpp), CTest `git_backend`.
+
+ЛР4 C: Coordinator — наскрізний ланцюжок Git→A→B→D, фоновий запуск (QThread), прогрес, скасування (std::stop_source), відкидання застарілих результатів (job-generation), first-parent валідація для тренду. Нові UI-контроли CommitsPage (вибір двох комітів, прогрес, скасування). Підключення history::query / loadSnapshot до сторінок Історії через MainWindow. [coordinator.hpp](../src/app/coordinator.hpp), [coordinator.cpp](../src/app/coordinator.cpp), CTest `coordinator`.
