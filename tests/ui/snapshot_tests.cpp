@@ -182,7 +182,12 @@ int main(int argc, char* argv[]) {
         gitSource->commitOid = "test-commit";
         gitSource->files.push_back({
             "src/history.cpp",
-            std::make_shared<const std::string>("int from_commit() { return 42; }\n"),
+            std::make_shared<const std::string>(
+                "// snapshot\n"
+                "int from_commit() {\n"
+                "    return 42;\n"
+                "}\n"
+                "// after function\n"),
             "test-content"
         });
 
@@ -249,10 +254,21 @@ int main(int argc, char* argv[]) {
         tree->setCurrentItem(gitFunction);
         app.processEvents();
 
-        require(editor->toPlainText() == "int from_commit() { return 42; }\n",
+        const QString expectedGitText =
+            "// snapshot\n"
+            "int from_commit() {\n"
+            "    return 42;\n"
+            "}\n"
+            "// after function\n";
+        require(editor->toPlainText() == expectedGitText,
                 "Viewer must display Git snapshot bytes, not the working file");
-        require(!editor->extraSelections().isEmpty(),
+        const auto gitSelections = editor->extraSelections();
+        require(!gitSelections.isEmpty(),
                 "Selecting a Git snapshot function must highlight its range");
+        require(gitSelections.front().cursor.selectionStart() == expectedGitText.indexOf("int from_commit"),
+                "Highlight must begin at the function");
+        require(gitSelections.front().cursor.selectionEnd() == expectedGitText.indexOf("}\n") + 1,
+                "Highlight must end after the function's closing brace");
 
         auto partialSource = std::make_shared<code::SourceSnapshot>(*gitSource);
         partialSource->files.push_back({
@@ -281,6 +297,15 @@ int main(int argc, char* argv[]) {
         auto* table = diagnostics.findChild<QTableWidget*>("diagnosticsTable");
         require(table && table->rowCount() > 0,
                 "Diagnostics must show the syntax error");
+        bool foundBrokenFile = false;
+        for (int row = 0; row < table->rowCount(); ++row) {
+            auto* pathItem = table->item(row, 0);
+            if (pathItem && pathItem->text() == "src/broken.cpp") {
+                foundBrokenFile = true;
+                break;
+            }
+        }
+        require(foundBrokenFile, "Diagnostics must identify the broken file");
 
         page.setSnapshot(parsed);
         app.processEvents();
