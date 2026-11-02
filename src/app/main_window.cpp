@@ -1,5 +1,6 @@
 #include "main_window.hpp"
 #include "app/analysis_controller.hpp"
+#include "app/coordinator.hpp"
 #include "ui/analysis/workspace.hpp"
 
 #include "ui/shared/navigation.hpp"
@@ -73,6 +74,7 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     contentStack_->addWidget(diagnostics_);
 
     analysisController_ = new AnalysisController(this);
+    coordinator_ = new Coordinator(this);
     analysisPages_ = new ui::analysis_pages::Workspace(analysisController_->session(), contentStack_);
     contentStack_->addWidget(analysisPages_);
     connect(analysisController_, &AnalysisController::progressChanged,
@@ -237,6 +239,77 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         if (structure_->openLocation(path, line)) navigation->setCurrentPage(ui::Section::code, 2);
     });
 
+    // Координатор: зв'язок Git-пайплайну зі сторінками історії та порівняння
+    connect(coordinator_, &Coordinator::statusMessage, this, [this](const QString& msg, int timeout) {
+        statusBar()->showMessage(msg, timeout);
+    });
+
+    connect(coordinator_, &Coordinator::repositoryQueried, this, [this](const history::HistoryResult& res) {
+        commitsPage_->setCommits(res.commits, /*isDemo=*/false);
+        historyFiltersPage_->setCommits(res.commits, /*isDemo=*/false);
+        codeChurnPage_->setChanges(res.changes, /*isDemo=*/false);
+        ancestryPage_->setCommits(res.commits, /*isDemo=*/false);
+    });
+
+    connect(coordinator_, &Coordinator::commitSnapshotLoaded, this, [this, navigation](auto snapshot) {
+        setSnapshot(snapshot, /*demonstration=*/false);
+        navigation->setCurrentPage(ui::Section::code, 2);
+    });
+
+    connect(coordinator_, &Coordinator::comparisonCompleted, this, [this, navigation](const review::ComparisonReport& rep) {
+        comparisonPage_->setReport(rep, /*isDemo=*/false);
+        exportPage_->setReport(rep);
+        navigation->setCurrentPage(ui::Section::review, 0);
+    });
+
+    connect(coordinator_, &Coordinator::trendCompleted, this, [this, navigation](const review::TrendReport& rep) {
+        trendPage_->setTrendReport(rep);
+        navigation->setCurrentPage(ui::Section::review, 1);
+    });
+
+    connect(coordinator_, &Coordinator::operationFailed, this, [this](const QString& op, const QString& err) {
+        statusBar()->showMessage(op + ": " + err, 7000);
+    });
+
+    connect(coordinator_, &Coordinator::operationCancelled, this, [this](const QString& op) {
+        statusBar()->showMessage(op + QString::fromUtf8(" скасовано"), 4000);
+    });
+
+    connect(coordinator_, &Coordinator::busyChanged, commitsPage_, &ui::history::CommitsPage::setBusy);
+    connect(coordinator_, &Coordinator::progressChanged, commitsPage_, &ui::history::CommitsPage::setProgress);
+
+    connect(commitsPage_, &ui::history::CommitsPage::openRepositoryRequested, this, [this]() {
+        const QString directory = QFileDialog::getExistingDirectory(
+            this,
+            QString::fromUtf8("Виберіть папку Git-репозиторію"),
+            source_->directory()
+        );
+        if (!directory.isEmpty()) {
+            coordinator_->openRepository(std::filesystem::path(directory.toStdWString()));
+        }
+    });
+
+    connect(commitsPage_, &ui::history::CommitsPage::compareRequested, this,
+            [this](const QString& base, const QString& target) {
+        coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        coordinator_->compareCommits(base.toStdString(), target.toStdString());
+    });
+
+    connect(commitsPage_, &ui::history::CommitsPage::trendRequested, this,
+            [this](const QString& tip) {
+        coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        coordinator_->buildTrend(tip.toStdString(), 20);
+    });
+
+    connect(commitsPage_, &ui::history::CommitsPage::commitSnapshotRequested, this,
+            [this](const QString& oid) {
+        coordinator_->loadCommitSnapshot(oid.toStdString());
+    });
+
+    connect(commitsPage_, &ui::history::CommitsPage::cancelRequested, this, [this]() {
+        coordinator_->cancel();
+    });
+
     connect(navigation, &ui::NavigationPanel::themeToggleRequested, this, [this, navigation]() {
         theme_ = theme_ == ui::Theme::dark ? ui::Theme::light : ui::Theme::dark;
         ui::applyTheme(*qApp, theme_);
@@ -252,6 +325,10 @@ void MainWindow::loadDirectory(const QString& directory) {
 
     source_->setDirectory(directory);
     loadSource(source_->sourceRequest());
+
+    if (coordinator_) {
+        coordinator_->openRepository(std::filesystem::path(directory.toStdWString()));
+    }
 }
 
 void MainWindow::loadSource(code::SourceRequest request) {

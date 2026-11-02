@@ -197,3 +197,70 @@
 | `testNonUtf8EncodingDetection` | Файл `win1251.cpp` без NUL-байтів виявляється за стандартом RFC 3629, пропускається з `unsupported_encoding` та `partial` coverage. |
 | `testParentIndexValidation` | Некоректний `parentIndex` відхиляється (`invalid_input` для root з index=1 та merge з index=5). |
 | `testCancellation` | Скасування `JobContext` повертає `xray::Cancelled` для `query` та `loadSnapshot`. |
+
+## ЛР №4 — Coordinator: наскрізний ланцюжок Git→A→B→D
+
+**Файли:**
+- [`src/app/coordinator.hpp`](../../src/app/coordinator.hpp) — клас `Coordinator` (QObject, сигнали, методи)
+- [`src/app/coordinator.cpp`](../../src/app/coordinator.cpp) — реалізація фонового запуску, прогресу, скасування
+- [`tests/app/coordinator_tests.cpp`](../../tests/app/coordinator_tests.cpp) — 5 автоматичних тестів (QTest)
+- [`src/ui/history/CommitsPage.hpp`](../../src/ui/history/CommitsPage.hpp) / `.cpp` — нові контроли, сигнали, слоти
+- [`src/app/main_window.hpp`](../../src/app/main_window.hpp) / `.cpp` — підключення coordinator до всіх сторінок
+
+**CTest-ціль:** `coordinator` (5 тестів, усі PASSED)
+
+### Клас Coordinator (src/app/)
+
+`Coordinator` — це `QObject`, що живе в головному потоці та координує весь pipeline у фонових QThread-потоках.
+
+| Метод | Опис |
+|---|---|
+| `openRepository(path)` | Запускає `history::query()` у фоні; при успіху емітує `repositoryQueried(result)` |
+| `loadCommitSnapshot(spec, oid)` | Запускає `history::loadSnapshot()` у фоні; результат — `commitSnapshotLoaded(snapshot)` |
+| `compareCommits(base, target)` | Запускає `code::parse` + `analysis::run` + `review::compare`; емітує `comparisonCompleted(report)` |
+| `buildTrend(commits)` | Перевіряє first-parent ланцюг, запускає `review::buildTrend`; емітує `trendCompleted(trend)` |
+| `cancel()` | Скасовує поточну операцію через `std::stop_source` |
+| `isBusy()` | Повертає `true`, якщо є активна фонова операція |
+| `validateFirstParentChain(commits)` *(static)* | Перевіряє, що коміти утворюють суворий first-parent ланцюг |
+| `extractFirstParentChain(commits)` *(static)* | Виділяє лінійний first-parent зріз із набору комітів |
+
+**Захист від застарілих результатів:** кожна нова операція збільшує `currentJobId_`. Лямбда-callback у QThread захоплює ID на старті; перед емітуванням сигналу звіряє зі свіжим `currentJobId_` — застарілий результат мовчки відкидається.
+
+**Скасування:** кожна операція отримує власний `std::stop_source`; попередній source замінюється при старті нової операції, що автоматично скасовує стару.
+
+### Нові UI-контроли CommitsPage
+
+| Control (objectName) | Призначення |
+|---|---|
+| `openRepoBtn` | "Відкрити репозиторій…" → `openRepositoryRequested` |
+| `setBaseBtn` | "Зробити базовим (A)" → зберігає `baseCommitOid_` |
+| `setTargetBtn` | "Зробити цільовим (B)" → зберігає `targetCommitOid_` |
+| `compareBtn` | "Порівняти A↔B" → `compareRequested(base, target)` |
+| `trendBtn` | "Побудувати тренд" → `trendRequested(commits)` |
+| `snapshotBtn` | "Відкрити код коміту" → `commitSnapshotRequested(oid)` |
+| `cancelBtn` | "Скасувати" → `cancelRequested` |
+| `progressLabel` | Відображає поточний прогрес або статус операції |
+
+Подвійний клік по рядку таблиці емітує `commitSnapshotRequested` з OID обраного коміту.
+
+### Підключення MainWindow
+
+`MainWindow` отримав поле `Coordinator* coordinator_` та `Q_OBJECT` макрос. У конструкторі:
+
+1. `repositoryQueried` → `CommitsPage::setHistory`, `HistoryFiltersPage::setCommits`, `CodeChurnPage::setChanges`, `AncestryPage::setCommits`
+2. `commitSnapshotLoaded` → `SourcePage::setSnapshot` (сторінка A)
+3. `comparisonCompleted` → `ComparisonPage::setReport`, `ExportPage::setReport` (сторінки B/D)
+4. `trendCompleted` → `TrendPage::setTrendReport` (сторінка B)
+5. Сигнали CommitsPage (`openRepositoryRequested`, `compareRequested`, `trendRequested`, `commitSnapshotRequested`, `cancelRequested`) → відповідні слоти Coordinator
+6. `busyChanged`, `progressChanged` → `CommitsPage::setBusy`, `CommitsPage::setProgress`
+7. `loadDirectory(path)` автоматично викликає `coordinator_->openRepository(path)`
+
+### Тести (coordinator_tests.cpp)
+
+| Тест | Що перевіряє |
+|---|---|
+| `testFirstParentValidation_ValidChain` | `validateFirstParentChain` приймає коректний first-parent ланцюг |
+| `testFirstParentValidation_InvalidBranchChain` | `validateFirstParentChain` відхиляє гілки, де коміти не є суворо first-parent |
+| `testExtractFirstParentChain` | `extractFirstParentChain` виділяє правильний лінійний зріз |
+| `testFullGitPipeline` | Повний цикл: Git-фікстура → `openRepository` → `commitSnapshotLoaded` (сигнал приходить із реальними даними) |
+| `testCancellation` | `cancel()` зупиняє поточну операцію; `busyChanged(false)` приходить без результату |
