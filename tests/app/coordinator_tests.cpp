@@ -235,13 +235,65 @@ private slots:
         Coordinator coordinator;
         coordinator.setRepositoryPath(std::filesystem::path(dir.path().toStdWString()));
 
+        QSignalSpy completedSpy(&coordinator, &Coordinator::comparisonCompleted);
+        QSignalSpy cancelledSpy(&coordinator, &Coordinator::operationCancelled);
+
         // Trigger and cancel immediately
         coordinator.compareCommits(c1Oid, c1Oid);
         coordinator.cancel();
 
         // Must gracefully finish without hang or crash
-        QTest::qWait(200);
-        QVERIFY(!coordinator.isBusy());
+        QTRY_VERIFY_WITH_TIMEOUT(!coordinator.isBusy(), 5000);
+        QCOMPARE(completedSpy.count(), 0); // a cancelled job must not report success
+        QVERIFY(cancelledSpy.count() >= 1);
+    }
+
+    void testSupersededJobDoesNotLeakCancellation() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        git_repository* repoRaw = nullptr;
+        QCOMPARE(git_repository_init(&repoRaw, dir.path().toUtf8().constData(), 0), 0);
+        Handle<git_repository, git_repository_free> repo(repoRaw, git_repository_free);
+
+        const std::string code = "int x() { return 100; }\n";
+        std::string c1Oid = makeCommit(repo.get(), "lib.cpp", code, "Init");
+
+        Coordinator coordinator;
+        coordinator.setRepositoryPath(std::filesystem::path(dir.path().toStdWString()));
+
+        QSignalSpy completedSpy(&coordinator, &Coordinator::comparisonCompleted);
+        QSignalSpy cancelledSpy(&coordinator, &Coordinator::operationCancelled);
+
+        // Supersede the first job before the event loop can deliver its result.
+        coordinator.compareCommits(c1Oid, c1Oid);
+        coordinator.compareCommits(c1Oid, c1Oid);
+
+        QTRY_VERIFY_WITH_TIMEOUT(!coordinator.isBusy(), 5000);
+        QCOMPARE(completedSpy.count(), 1); // only the current job reports
+        QCOMPARE(cancelledSpy.count(), 0); // stale cancellation must not be shown
+    }
+
+    void testDestructorWaitsForSupersededWorkers() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        git_repository* repoRaw = nullptr;
+        QCOMPARE(git_repository_init(&repoRaw, dir.path().toUtf8().constData(), 0), 0);
+        Handle<git_repository, git_repository_free> repo(repoRaw, git_repository_free);
+
+        const std::string code = "int x() { return 100; }\n";
+        std::string c1Oid = makeCommit(repo.get(), "lib.cpp", code, "Init");
+
+        {
+            Coordinator coordinator;
+            coordinator.setRepositoryPath(std::filesystem::path(dir.path().toStdWString()));
+            coordinator.compareCommits(c1Oid, c1Oid);
+            coordinator.compareCommits(c1Oid, c1Oid);
+            coordinator.compareCommits(c1Oid, c1Oid);
+            // Destructor runs here while superseded workers may still be alive.
+        }
+        QVERIFY(true);
     }
 };
 

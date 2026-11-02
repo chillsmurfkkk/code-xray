@@ -25,6 +25,7 @@
 #include "code/api.hpp"
 #include "ui/code/demo_snapshot.hpp"
 
+#include <algorithm>
 #include <exception>
 #include <chrono>
 #include <memory>
@@ -244,11 +245,25 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         statusBar()->showMessage(msg, timeout);
     });
 
+    // A new repository is being opened: drop all data that belongs to the
+    // previous repository so a failed open cannot leave stale commits visible.
+    connect(coordinator_, &Coordinator::repositoryOpening, this, [this]() {
+        commitsPage_->setCommits({}, /*isDemo=*/false);
+        historyFiltersPage_->setCommits({}, /*isDemo=*/false);
+        codeChurnPage_->setChanges({}, /*isDemo=*/false);
+        ancestryPage_->setCommits({}, /*isDemo=*/false);
+        trendPage_->setRepositoryTip(QString{});
+        trendPage_->setAvailableTargets({}, {});
+    });
+
     connect(coordinator_, &Coordinator::repositoryQueried, this, [this](const history::HistoryResult& res) {
         commitsPage_->setCommits(res.commits, /*isDemo=*/false);
         historyFiltersPage_->setCommits(res.commits, /*isDemo=*/false);
         codeChurnPage_->setChanges(res.changes, /*isDemo=*/false);
         ancestryPage_->setCommits(res.commits, /*isDemo=*/false);
+        trendPage_->setRepositoryTip(res.commits.empty()
+            ? QString{}
+            : QString::fromStdString(res.commits.front().oid));
     });
 
     connect(coordinator_, &Coordinator::commitSnapshotLoaded, this, [this, navigation](auto snapshot) {
@@ -263,7 +278,7 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     });
 
     connect(coordinator_, &Coordinator::trendCompleted, this, [this, navigation](const review::TrendReport& rep) {
-        trendPage_->setTrendReport(rep);
+        trendPage_->setTrendReport(rep, /*isDemo=*/false);
         navigation->setCurrentPage(ui::Section::review, 1);
     });
 
@@ -291,34 +306,39 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
 
     connect(commitsPage_, &ui::history::CommitsPage::compareRequested, this,
             [this](const QString& base, const QString& target) {
-        coordinator_->setAnalysisProfile(analysisController_->session().profile());
         code::FileSelection selection;
-        QString selectionError;
-        if (fileSelection_->applyTo(selection, selectionError)) {
-            coordinator_->setFileSelection(std::move(selection));
-        }
+        if (!resolveFileSelection(selection)) return;
+        coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        coordinator_->setFileSelection(std::move(selection));
         coordinator_->compareCommits(base.toStdString(), target.toStdString());
     });
 
     connect(commitsPage_, &ui::history::CommitsPage::trendRequested, this,
             [this](const QString& tip) {
-        coordinator_->setAnalysisProfile(analysisController_->session().profile());
         code::FileSelection selection;
-        QString selectionError;
-        if (fileSelection_->applyTo(selection, selectionError)) {
-            coordinator_->setFileSelection(std::move(selection));
-        }
+        if (!resolveFileSelection(selection)) return;
+        coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        coordinator_->setFileSelection(std::move(selection));
         coordinator_->buildTrend(tip.toStdString(), 20);
     });
 
     connect(commitsPage_, &ui::history::CommitsPage::commitSnapshotRequested, this,
             [this](const QString& oid) {
         code::FileSelection selection;
-        QString selectionError;
-        if (fileSelection_->applyTo(selection, selectionError)) {
-            coordinator_->setFileSelection(std::move(selection));
-        }
+        if (!resolveFileSelection(selection)) return;
+        coordinator_->setFileSelection(std::move(selection));
         coordinator_->loadCommitSnapshot(oid.toStdString());
+    });
+
+    connect(trendPage_, &ui::review::TrendPage::trendRebuildRequested, this,
+            [this](const QString& tip, analysis::MetricId metricId,
+                   review::TrendAggregation aggregation, const QString& entityKey) {
+        code::FileSelection selection;
+        if (!resolveFileSelection(selection)) return;
+        coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        coordinator_->setFileSelection(std::move(selection));
+        coordinator_->buildTrend(tip.toStdString(), 20, metricId, aggregation,
+                                 entityKey.toStdString());
     });
 
     connect(commitsPage_, &ui::history::CommitsPage::cancelRequested, this, [this]() {
@@ -346,16 +366,23 @@ void MainWindow::loadDirectory(const QString& directory) {
     }
 }
 
-void MainWindow::loadSource(code::SourceRequest request) {
-    if (sourceThread_) return;
-
+bool MainWindow::resolveFileSelection(code::FileSelection& selection) {
     QString selectionError;
-    if (!fileSelection_->applyTo(request.selection, selectionError)) {
+    if (!fileSelection_->applyTo(selection, selectionError)) {
         QMessageBox::warning(
             this,
             QString::fromUtf8("Некоректний відбір файлів"),
             selectionError
         );
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::loadSource(code::SourceRequest request) {
+    if (sourceThread_) return;
+
+    if (!resolveFileSelection(request.selection)) {
         return;
     }
 
@@ -496,6 +523,28 @@ void MainWindow::setSnapshot(std::shared_ptr<const code::ParsedSnapshot> snapsho
     analysisPages_->setContext(!snapshot ? QString::fromUtf8("Відкрийте джерело у розділі «Код → Джерело».")
         : demonstration ? QString::fromUtf8("Демонстраційний знімок")
                         : QString::fromUtf8("Поточний знімок відкритої папки"));
+
+    if (trendPage_) {
+        std::vector<std::string> functionKeys;
+        std::vector<std::string> filePaths;
+        if (snapshot) {
+            for (const auto& unit : snapshot->units) {
+                if (!unit.relativePath.empty()
+                    && std::find(filePaths.begin(), filePaths.end(), unit.relativePath) == filePaths.end()) {
+                    filePaths.push_back(unit.relativePath);
+                }
+                for (const auto& function : unit.functions) {
+                    if (function && !function->identityKey.empty()
+                        && std::find(functionKeys.begin(), functionKeys.end(), function->identityKey)
+                            == functionKeys.end()) {
+                        functionKeys.push_back(function->identityKey);
+                    }
+                }
+            }
+        }
+        trendPage_->setAvailableTargets(functionKeys, filePaths);
+    }
+
     analysisController_->setInput(std::move(snapshot));
 }
 

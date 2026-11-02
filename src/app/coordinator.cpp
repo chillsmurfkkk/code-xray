@@ -20,10 +20,22 @@ Coordinator::Coordinator(QObject* parent)
 }
 
 Coordinator::~Coordinator() {
+    // Stop every worker before waiting: a superseded thread may still be running
+    // and must never be destroyed while active (QThread aborts in that case).
     currentStopSource_.request_stop();
+    for (auto& pending : pendingThreads_) {
+        pending.stopSource.request_stop();
+    }
+
     if (workerThread_) {
         workerThread_->wait();
     }
+    for (auto& pending : pendingThreads_) {
+        if (pending.thread) {
+            pending.thread->wait();
+        }
+    }
+    pendingThreads_.clear();
 }
 
 void Coordinator::setRepositoryPath(const std::filesystem::path& repoPath) {
@@ -54,25 +66,33 @@ void Coordinator::cancel() {
 }
 
 void Coordinator::setWorker(QThread* thread, std::stop_source stopSource, JobId id) {
-    // Cancel the previous operation without blocking the GUI thread.
-    // The old thread will delete itself via deleteLater when it finishes.
+    // Cancel the previous operation without blocking the GUI thread. The old
+    // thread (and its stop source) stays tracked until it finishes so the
+    // destructor can request cancellation and wait for it safely.
     if (workerThread_) {
         currentStopSource_.request_stop();
-        // Do NOT call workerThread_->wait() here — that would freeze the GUI
-        // until the library call inside the thread completes.
+        pendingThreads_.push_back({workerThread_, currentStopSource_});
     }
     workerThread_ = thread;
     currentStopSource_ = std::move(stopSource);
     currentJobId_ = id;
     emit busyChanged(true);
 
-    connect(thread, &QThread::finished, this, [this, id] {
+    connect(thread, &QThread::finished, this, [this, thread, id] {
+        pendingThreads_.erase(
+            std::remove_if(pendingThreads_.begin(), pendingThreads_.end(),
+                           [thread](const PendingWorker& pending) {
+                               return pending.thread == thread;
+                           }),
+            pendingThreads_.end());
         if (id == currentJobId_) {
             workerThread_ = nullptr;
             emit busyChanged(false);
         }
+        // Schedule deletion only after the bookkeeping above has run, so no
+        // pendingThreads_ entry can outlive its QThread object.
+        thread->deleteLater();
     });
-    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
 }
 
 bool Coordinator::validateFirstParentChain(
@@ -232,6 +252,7 @@ void Coordinator::openRepository(const std::filesystem::path& repoPath) {
     std::stop_source stopSource;
     const auto token = stopSource.get_token();
 
+    emit repositoryOpening();
     emit statusMessage(QString::fromUtf8("Читаємо журнал комітів Git…"));
 
     auto thread = QThread::create([this, repoPath, jobId, token]() {
@@ -262,11 +283,11 @@ void Coordinator::openRepository(const std::filesystem::path& repoPath) {
         }
 
         QMetaObject::invokeMethod(this, [this, jobId, result]() {
-            if (std::holds_alternative<Cancelled>(*result)) {
-                emit operationCancelled(QString::fromUtf8("Відкриття репозиторію"));
+            if (jobId != currentJobId_) {
                 return;
             }
-            if (jobId != currentJobId_) {
+            if (currentStopSource_.stop_requested() || std::holds_alternative<Cancelled>(*result)) {
+                emit operationCancelled(QString::fromUtf8("Відкриття репозиторію"));
                 return;
             }
             if (std::holds_alternative<Error>(*result)) {
@@ -336,11 +357,11 @@ void Coordinator::loadCommitSnapshot(const std::string& oid) {
         }
 
         QMetaObject::invokeMethod(this, [this, jobId, result]() {
-            if (std::holds_alternative<Cancelled>(*result)) {
-                emit operationCancelled(QString::fromUtf8("Завантаження знімку"));
+            if (jobId != currentJobId_) {
                 return;
             }
-            if (jobId != currentJobId_) {
+            if (currentStopSource_.stop_requested() || std::holds_alternative<Cancelled>(*result)) {
+                emit operationCancelled(QString::fromUtf8("Завантаження знімку"));
                 return;
             }
             if (std::holds_alternative<Error>(*result)) {
@@ -455,14 +476,14 @@ void Coordinator::compareCommits(const std::string& baseOid, const std::string& 
 
         auto resultPtr = std::make_shared<CompRes>(std::move(result));
         QMetaObject::invokeMethod(this, [this, jobId, resultPtr]() {
-            // Always deliver — even for stale jobs emit operationCancelled so GUI clears busy state.
-            const bool isCurrent = (jobId == currentJobId_);
-            if (std::holds_alternative<Cancelled>(*resultPtr)) {
-                emit operationCancelled(QString::fromUtf8("Порівняння комітів"));
-            } else if (!isCurrent) {
-                // Stale success/error result — silently discard (busy state managed by newer job)
+            if (jobId != currentJobId_) {
                 return;
-            } else if (std::holds_alternative<Error>(*resultPtr)) {
+            }
+            if (currentStopSource_.stop_requested() || std::holds_alternative<Cancelled>(*resultPtr)) {
+                emit operationCancelled(QString::fromUtf8("Порівняння комітів"));
+                return;
+            }
+            if (std::holds_alternative<Error>(*resultPtr)) {
                 const auto& err = std::get<Error>(*resultPtr);
                 emit operationFailed(QString::fromUtf8("Порівняння комітів"), QString::fromStdString(err.message));
             } else if (auto* report = std::get_if<review::ComparisonReport>(resultPtr.get())) {
@@ -581,6 +602,10 @@ void Coordinator::buildTrend(const std::string& tipOid, std::size_t limit,
             trendOpts.metricId = metricId;
             trendOpts.aggregation = agg;
             trendOpts.entityKey = entityKey;
+            // For file aggregations the selected target is a relative path.
+            if (agg != review::TrendAggregation::function) {
+                trendOpts.relativePath = entityKey;
+            }
             trendOpts.limit = limit;
 
             // If aggregation is by function and no entityKey was specified, auto-detect
@@ -614,13 +639,14 @@ void Coordinator::buildTrend(const std::string& tipOid, std::size_t limit,
 
         auto resultPtr = std::make_shared<TrendRes>(std::move(result));
         QMetaObject::invokeMethod(this, [this, jobId, resultPtr]() {
-            const bool isCurrent = (jobId == currentJobId_);
-            if (std::holds_alternative<Cancelled>(*resultPtr)) {
-                // Always report cancellation so the GUI clears the busy state.
-                emit operationCancelled(QString::fromUtf8("Побудова тренду"));
-            } else if (!isCurrent) {
+            if (jobId != currentJobId_) {
                 return;
-            } else if (std::holds_alternative<Error>(*resultPtr)) {
+            }
+            if (currentStopSource_.stop_requested() || std::holds_alternative<Cancelled>(*resultPtr)) {
+                emit operationCancelled(QString::fromUtf8("Побудова тренду"));
+                return;
+            }
+            if (std::holds_alternative<Error>(*resultPtr)) {
                 const auto& err = std::get<Error>(*resultPtr);
                 emit operationFailed(QString::fromUtf8("Побудова тренду"), QString::fromStdString(err.message));
             } else if (auto* report = std::get_if<review::TrendReport>(resultPtr.get())) {

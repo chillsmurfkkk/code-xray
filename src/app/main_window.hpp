@@ -46,6 +46,7 @@ private:
     ui::Theme theme_;
     void loadDirectory(const QString& directory);
     void loadSource(code::SourceRequest request);
+    bool resolveFileSelection(code::FileSelection& selection);
 
     void cancelSource();
 

@@ -73,6 +73,10 @@ signals:
     void statusMessage(const QString& message, int timeoutMs = 0);
     void busyChanged(bool busy);
 
+    /// Emitted synchronously when a new repository load starts, so views can
+    /// drop data that belongs to the previously opened repository.
+    void repositoryOpening();
+
     void repositoryQueried(const xray::history::HistoryResult& result);
     void commitSnapshotLoaded(std::shared_ptr<const xray::code::ParsedSnapshot> parsedSnapshot);
     void comparisonCompleted(const xray::review::ComparisonReport& report);
@@ -93,7 +97,13 @@ private:
     std::vector<history::CommitRecord> cachedCommits_;
     std::vector<history::ChangeRecord> cachedChanges_;
 
+    struct PendingWorker {
+        QThread* thread = nullptr;
+        std::stop_source stopSource;
+    };
+
     QThread* workerThread_ = nullptr;
+    std::vector<PendingWorker> pendingThreads_;
     std::stop_source currentStopSource_;
     JobId currentJobId_ = 0;
 };
