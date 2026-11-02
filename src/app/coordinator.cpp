@@ -54,9 +54,12 @@ void Coordinator::cancel() {
 }
 
 void Coordinator::setWorker(QThread* thread, std::stop_source stopSource, JobId id) {
+    // Cancel the previous operation without blocking the GUI thread.
+    // The old thread will delete itself via deleteLater when it finishes.
     if (workerThread_) {
         currentStopSource_.request_stop();
-        workerThread_->wait();
+        // Do NOT call workerThread_->wait() here — that would freeze the GUI
+        // until the library call inside the thread completes.
     }
     workerThread_ = thread;
     currentStopSource_ = std::move(stopSource);
@@ -64,7 +67,7 @@ void Coordinator::setWorker(QThread* thread, std::stop_source stopSource, JobId 
     emit busyChanged(true);
 
     connect(thread, &QThread::finished, this, [this, id] {
-        if (workerThread_ && id == currentJobId_) {
+        if (id == currentJobId_) {
             workerThread_ = nullptr;
             emit busyChanged(false);
         }
@@ -259,12 +262,14 @@ void Coordinator::openRepository(const std::filesystem::path& repoPath) {
         }
 
         QMetaObject::invokeMethod(this, [this, jobId, result]() {
-            if (jobId != currentJobId_ || currentStopSource_.stop_requested()) {
-                return;
-            }
             if (std::holds_alternative<Cancelled>(*result)) {
                 emit operationCancelled(QString::fromUtf8("Відкриття репозиторію"));
-            } else if (std::holds_alternative<Error>(*result)) {
+                return;
+            }
+            if (jobId != currentJobId_) {
+                return;
+            }
+            if (std::holds_alternative<Error>(*result)) {
                 const auto& err = std::get<Error>(*result);
                 emit operationFailed(QString::fromUtf8("Відкриття репозиторію"), QString::fromStdString(err.message));
             } else if (auto* histRes = std::get_if<history::HistoryResult>(result.get())) {
@@ -331,12 +336,14 @@ void Coordinator::loadCommitSnapshot(const std::string& oid) {
         }
 
         QMetaObject::invokeMethod(this, [this, jobId, result]() {
-            if (jobId != currentJobId_ || currentStopSource_.stop_requested()) {
-                return;
-            }
             if (std::holds_alternative<Cancelled>(*result)) {
                 emit operationCancelled(QString::fromUtf8("Завантаження знімку"));
-            } else if (std::holds_alternative<Error>(*result)) {
+                return;
+            }
+            if (jobId != currentJobId_) {
+                return;
+            }
+            if (std::holds_alternative<Error>(*result)) {
                 const auto& err = std::get<Error>(*result);
                 emit operationFailed(QString::fromUtf8("Завантаження знімку"), QString::fromStdString(err.message));
             } else if (auto* parsed = std::get_if<code::ParsedSnapshot>(result.get())) {
@@ -370,9 +377,10 @@ void Coordinator::compareCommits(const std::string& baseOid, const std::string& 
                                    profile = profile_, compOpts = comparisonOptions_,
                                    jobId, token]() {
         using CompRes = Result<review::ComparisonReport>;
-        auto result = std::make_shared<CompRes>(Cancelled{});
 
-        try {
+        // Run the full pipeline and always return a result — never early-return
+        // before invokeMethod, so errors and cancellations always reach the GUI.
+        auto runPipeline = [&]() -> CompRes {
             JobContext ctx;
             ctx.jobId = jobId;
             ctx.stopToken = token;
@@ -389,46 +397,46 @@ void Coordinator::compareCommits(const std::string& baseOid, const std::string& 
             // 1. Base snapshot
             ctx.report("Завантаження базового коміту", 1, 7);
             auto baseSnap = history::loadSnapshot(spec, baseOid, selection, ctx);
-            if (std::holds_alternative<Cancelled>(baseSnap)) { *result = Cancelled{}; return; }
-            if (std::holds_alternative<Error>(baseSnap)) { *result = std::get<Error>(baseSnap); return; }
+            if (std::holds_alternative<Cancelled>(baseSnap)) return Cancelled{};
+            if (std::holds_alternative<Error>(baseSnap)) return std::get<Error>(baseSnap);
 
             // 2. Base parse
             ctx.report("Розбір коду базового коміту", 2, 7);
             auto baseSnapPtr = std::make_shared<const code::SourceSnapshot>(
                 std::get<code::SourceSnapshot>(std::move(baseSnap)));
             auto baseParsed = code::parse(baseSnapPtr, parseOpts, ctx);
-            if (std::holds_alternative<Cancelled>(baseParsed)) { *result = Cancelled{}; return; }
-            if (std::holds_alternative<Error>(baseParsed)) { *result = std::get<Error>(baseParsed); return; }
+            if (std::holds_alternative<Cancelled>(baseParsed)) return Cancelled{};
+            if (std::holds_alternative<Error>(baseParsed)) return std::get<Error>(baseParsed);
 
             // 3. Base analyze
             ctx.report("Аналіз метрик базового коміту", 3, 7);
             auto baseParsedPtr = std::make_shared<const code::ParsedSnapshot>(
                 std::get<code::ParsedSnapshot>(std::move(baseParsed)));
             auto baseAnalysis = analysis::analyze(baseParsedPtr, profile, ctx);
-            if (std::holds_alternative<Cancelled>(baseAnalysis)) { *result = Cancelled{}; return; }
-            if (std::holds_alternative<Error>(baseAnalysis)) { *result = std::get<Error>(baseAnalysis); return; }
+            if (std::holds_alternative<Cancelled>(baseAnalysis)) return Cancelled{};
+            if (std::holds_alternative<Error>(baseAnalysis)) return std::get<Error>(baseAnalysis);
 
             // 4. Target snapshot
             ctx.report("Завантаження цільового коміту", 4, 7);
             auto targetSnap = history::loadSnapshot(spec, targetOid, selection, ctx);
-            if (std::holds_alternative<Cancelled>(targetSnap)) { *result = Cancelled{}; return; }
-            if (std::holds_alternative<Error>(targetSnap)) { *result = std::get<Error>(targetSnap); return; }
+            if (std::holds_alternative<Cancelled>(targetSnap)) return Cancelled{};
+            if (std::holds_alternative<Error>(targetSnap)) return std::get<Error>(targetSnap);
 
             // 5. Target parse
             ctx.report("Розбір коду цільового коміту", 5, 7);
             auto targetSnapPtr = std::make_shared<const code::SourceSnapshot>(
                 std::get<code::SourceSnapshot>(std::move(targetSnap)));
             auto targetParsed = code::parse(targetSnapPtr, parseOpts, ctx);
-            if (std::holds_alternative<Cancelled>(targetParsed)) { *result = Cancelled{}; return; }
-            if (std::holds_alternative<Error>(targetParsed)) { *result = std::get<Error>(targetParsed); return; }
+            if (std::holds_alternative<Cancelled>(targetParsed)) return Cancelled{};
+            if (std::holds_alternative<Error>(targetParsed)) return std::get<Error>(targetParsed);
 
             // 6. Target analyze
             ctx.report("Аналіз метрик цільового коміту", 6, 7);
             auto targetParsedPtr = std::make_shared<const code::ParsedSnapshot>(
                 std::get<code::ParsedSnapshot>(std::move(targetParsed)));
             auto targetAnalysis = analysis::analyze(targetParsedPtr, profile, ctx);
-            if (std::holds_alternative<Cancelled>(targetAnalysis)) { *result = Cancelled{}; return; }
-            if (std::holds_alternative<Error>(targetAnalysis)) { *result = std::get<Error>(targetAnalysis); return; }
+            if (std::holds_alternative<Cancelled>(targetAnalysis)) return Cancelled{};
+            if (std::holds_alternative<Error>(targetAnalysis)) return std::get<Error>(targetAnalysis);
 
             // 7. Review compare
             ctx.report("Порівняння ревізій та формування звіту", 7, 7);
@@ -436,24 +444,28 @@ void Coordinator::compareCommits(const std::string& baseOid, const std::string& 
                 std::get<analysis::AnalysisSnapshot>(std::move(baseAnalysis)));
             auto targetAnalysisPtr = std::make_shared<const analysis::AnalysisSnapshot>(
                 std::get<analysis::AnalysisSnapshot>(std::move(targetAnalysis)));
+            return review::compare(baseAnalysisPtr, targetAnalysisPtr, compOpts, ctx);
+        };
 
-            *result = review::compare(baseAnalysisPtr, targetAnalysisPtr, compOpts, ctx);
-        } catch (const std::exception& e) {
-            *result = Error{ErrorCode::invalid_input, e.what()};
-        } catch (...) {
-            *result = Error{ErrorCode::invalid_input, "Невідома помилка порівняння комітів"};
-        }
+        CompRes result = [&]() -> CompRes {
+            try { return runPipeline(); }
+            catch (const std::exception& e) { return Error{ErrorCode::invalid_input, e.what()}; }
+            catch (...) { return Error{ErrorCode::invalid_input, "Невідома помилка порівняння комітів"}; }
+        }();
 
-        QMetaObject::invokeMethod(this, [this, jobId, result]() {
-            if (jobId != currentJobId_ || currentStopSource_.stop_requested()) {
-                return;
-            }
-            if (std::holds_alternative<Cancelled>(*result)) {
+        auto resultPtr = std::make_shared<CompRes>(std::move(result));
+        QMetaObject::invokeMethod(this, [this, jobId, resultPtr]() {
+            // Always deliver — even for stale jobs emit operationCancelled so GUI clears busy state.
+            const bool isCurrent = (jobId == currentJobId_);
+            if (std::holds_alternative<Cancelled>(*resultPtr)) {
                 emit operationCancelled(QString::fromUtf8("Порівняння комітів"));
-            } else if (std::holds_alternative<Error>(*result)) {
-                const auto& err = std::get<Error>(*result);
+            } else if (!isCurrent) {
+                // Stale success/error result — silently discard (busy state managed by newer job)
+                return;
+            } else if (std::holds_alternative<Error>(*resultPtr)) {
+                const auto& err = std::get<Error>(*resultPtr);
                 emit operationFailed(QString::fromUtf8("Порівняння комітів"), QString::fromStdString(err.message));
-            } else if (auto* report = std::get_if<review::ComparisonReport>(result.get())) {
+            } else if (auto* report = std::get_if<review::ComparisonReport>(resultPtr.get())) {
                 emit comparisonCompleted(*report);
                 emit statusMessage(QString::fromUtf8("Порівняння завершено успішно (знайдено %1 змін)")
                     .arg(report->items.size()), 5000);
@@ -490,9 +502,10 @@ void Coordinator::buildTrend(const std::string& tipOid, std::size_t limit,
                                    entityKey, selection = fileSelection_, parseOpts = parseOptions_,
                                    profile = profile_, jobId, token]() {
         using TrendRes = Result<review::TrendReport>;
-        auto result = std::make_shared<TrendRes>(Cancelled{});
 
-        try {
+        // Wrapped pipeline: always returns a result without early-returning from
+        // the thread function, so the invokeMethod below always fires.
+        auto runPipeline = [&]() -> TrendRes {
             JobContext ctx;
             ctx.jobId = jobId;
             ctx.stopToken = token;
@@ -512,14 +525,13 @@ void Coordinator::buildTrend(const std::string& tipOid, std::size_t limit,
 
             ctx.report("Отримання first-parent ланцюжка комітів", 0, limit);
             auto histRes = history::query(spec, req, ctx);
-            if (std::holds_alternative<Cancelled>(histRes)) { *result = Cancelled{}; return; }
-            if (std::holds_alternative<Error>(histRes)) { *result = std::get<Error>(histRes); return; }
+            if (std::holds_alternative<Cancelled>(histRes)) return Cancelled{};
+            if (std::holds_alternative<Error>(histRes)) return std::get<Error>(histRes);
 
             const auto& historyResult = std::get<history::HistoryResult>(histRes);
             const auto& chain = historyResult.commits;
             if (chain.empty()) {
-                *result = Error{ErrorCode::invalid_input, "Не знайдено комітів для побудови тренду від " + tipOid};
-                return;
+                return Error{ErrorCode::invalid_input, "Не знайдено комітів для побудови тренду від " + tipOid};
             }
 
             // Перевірка first-parent зв'язку
@@ -529,8 +541,7 @@ void Coordinator::buildTrend(const std::string& tipOid, std::size_t limit,
 
             std::string validationError;
             if (!validateFirstParentChain(chain, chainOids, &validationError)) {
-                *result = Error{ErrorCode::invalid_input, "Помилка валідації first-parent ланцюжка: " + validationError};
-                return;
+                return Error{ErrorCode::invalid_input, "Помилка валідації first-parent ланцюжка: " + validationError};
             }
 
             // revwalk дає від новіших до старіших; для OrderedAnalyses потрібні найстаріші першими
@@ -541,25 +552,25 @@ void Coordinator::buildTrend(const std::string& tipOid, std::size_t limit,
 
             const std::size_t total = orderedCommits.size();
             for (std::size_t i = 0; i < total; ++i) {
-                if (ctx.isCancelled()) { *result = Cancelled{}; return; }
+                if (ctx.isCancelled()) return Cancelled{};
                 const auto& c = orderedCommits[i];
                 ctx.report("Аналіз ревізії " + c.oid.substr(0, 7), i + 1, total);
 
                 auto snapRes = history::loadSnapshot(spec, c.oid, selection, ctx);
-                if (std::holds_alternative<Cancelled>(snapRes)) { *result = Cancelled{}; return; }
-                if (std::holds_alternative<Error>(snapRes)) { *result = std::get<Error>(snapRes); return; }
+                if (std::holds_alternative<Cancelled>(snapRes)) return Cancelled{};
+                if (std::holds_alternative<Error>(snapRes)) return std::get<Error>(snapRes);
 
                 auto snapPtr = std::make_shared<const code::SourceSnapshot>(
                     std::get<code::SourceSnapshot>(std::move(snapRes)));
                 auto parseRes = code::parse(snapPtr, parseOpts, ctx);
-                if (std::holds_alternative<Cancelled>(parseRes)) { *result = Cancelled{}; return; }
-                if (std::holds_alternative<Error>(parseRes)) { *result = std::get<Error>(parseRes); return; }
+                if (std::holds_alternative<Cancelled>(parseRes)) return Cancelled{};
+                if (std::holds_alternative<Error>(parseRes)) return std::get<Error>(parseRes);
 
                 auto parsePtr = std::make_shared<const code::ParsedSnapshot>(
                     std::get<code::ParsedSnapshot>(std::move(parseRes)));
                 auto anaRes = analysis::analyze(parsePtr, profile, ctx);
-                if (std::holds_alternative<Cancelled>(anaRes)) { *result = Cancelled{}; return; }
-                if (std::holds_alternative<Error>(anaRes)) { *result = std::get<Error>(anaRes); return; }
+                if (std::holds_alternative<Cancelled>(anaRes)) return Cancelled{};
+                if (std::holds_alternative<Error>(anaRes)) return std::get<Error>(anaRes);
 
                 auto anaPtr = std::make_shared<const analysis::AnalysisSnapshot>(
                     std::get<analysis::AnalysisSnapshot>(std::move(anaRes)));
@@ -572,24 +583,47 @@ void Coordinator::buildTrend(const std::string& tipOid, std::size_t limit,
             trendOpts.entityKey = entityKey;
             trendOpts.limit = limit;
 
-            ctx.report("Розрахунок тренду", total, total);
-            *result = review::buildTrend(ordered, trendOpts, ctx);
-        } catch (const std::exception& e) {
-            *result = Error{ErrorCode::invalid_input, e.what()};
-        } catch (...) {
-            *result = Error{ErrorCode::invalid_input, "Невідома помилка побудови тренду"};
-        }
-
-        QMetaObject::invokeMethod(this, [this, jobId, result]() {
-            if (jobId != currentJobId_ || currentStopSource_.stop_requested()) {
-                return;
+            // If aggregation is by function and no entityKey was specified, auto-detect
+            // the first available function from the latest snapshot so the trend isn't empty gaps.
+            if (trendOpts.aggregation == review::TrendAggregation::function && trendOpts.entityKey.empty()) {
+                for (auto it = ordered.snapshots.rbegin(); it != ordered.snapshots.rend(); ++it) {
+                    if (*it && (*it)->parsed) {
+                        for (const auto& u : (*it)->parsed->units) {
+                            for (const auto& fn : u.functions) {
+                                if (fn && !fn->identityKey.empty()) {
+                                    trendOpts.entityKey = fn->identityKey;
+                                    break;
+                                }
+                            }
+                            if (!trendOpts.entityKey.empty()) break;
+                        }
+                    }
+                    if (!trendOpts.entityKey.empty()) break;
+                }
             }
-            if (std::holds_alternative<Cancelled>(*result)) {
+
+            ctx.report("Розрахунок тренду", total, total);
+            return review::buildTrend(ordered, trendOpts, ctx);
+        };
+
+        TrendRes result = [&]() -> TrendRes {
+            try { return runPipeline(); }
+            catch (const std::exception& e) { return Error{ErrorCode::invalid_input, e.what()}; }
+            catch (...) { return Error{ErrorCode::invalid_input, "Невідома помилка побудови тренду"}; }
+        }();
+
+        auto resultPtr = std::make_shared<TrendRes>(std::move(result));
+        QMetaObject::invokeMethod(this, [this, jobId, resultPtr]() {
+            const bool isCurrent = (jobId == currentJobId_);
+            if (std::holds_alternative<Cancelled>(*resultPtr)) {
+                // Always report cancellation so the GUI clears the busy state.
                 emit operationCancelled(QString::fromUtf8("Побудова тренду"));
-            } else if (std::holds_alternative<Error>(*result)) {
-                const auto& err = std::get<Error>(*result);
+            } else if (!isCurrent) {
+                return;
+            } else if (std::holds_alternative<Error>(*resultPtr)) {
+                const auto& err = std::get<Error>(*resultPtr);
                 emit operationFailed(QString::fromUtf8("Побудова тренду"), QString::fromStdString(err.message));
-            } else if (auto* report = std::get_if<review::TrendReport>(result.get())) {
+            } else if (auto* report = std::get_if<review::TrendReport>(resultPtr.get())) {
                 emit trendCompleted(*report);
                 emit statusMessage(QString::fromUtf8("Тренд успішно побудовано (точок: %1)")
                     .arg(report->points.size()), 5000);

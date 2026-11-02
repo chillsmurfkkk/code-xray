@@ -292,17 +292,32 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     connect(commitsPage_, &ui::history::CommitsPage::compareRequested, this,
             [this](const QString& base, const QString& target) {
         coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        code::FileSelection selection;
+        QString selectionError;
+        if (fileSelection_->applyTo(selection, selectionError)) {
+            coordinator_->setFileSelection(std::move(selection));
+        }
         coordinator_->compareCommits(base.toStdString(), target.toStdString());
     });
 
     connect(commitsPage_, &ui::history::CommitsPage::trendRequested, this,
             [this](const QString& tip) {
         coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        code::FileSelection selection;
+        QString selectionError;
+        if (fileSelection_->applyTo(selection, selectionError)) {
+            coordinator_->setFileSelection(std::move(selection));
+        }
         coordinator_->buildTrend(tip.toStdString(), 20);
     });
 
     connect(commitsPage_, &ui::history::CommitsPage::commitSnapshotRequested, this,
             [this](const QString& oid) {
+        code::FileSelection selection;
+        QString selectionError;
+        if (fileSelection_->applyTo(selection, selectionError)) {
+            coordinator_->setFileSelection(std::move(selection));
+        }
         coordinator_->loadCommitSnapshot(oid.toStdString());
     });
 
