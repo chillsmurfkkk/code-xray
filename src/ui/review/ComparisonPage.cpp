@@ -27,6 +27,7 @@ ComparisonPage::ComparisonPage(QWidget* parent)
     headerLayout->addWidget(titleLabel);
 
     demoBadge_ = new QLabel(QString::fromUtf8("Демо-режим"));
+    demoBadge_->setObjectName("comparisonDemoBadge");
     demoBadge_->setStyleSheet(
         "background: #d65d0e; color: #ebdbb2; font-weight: bold; "
         "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
@@ -40,12 +41,14 @@ ComparisonPage::ComparisonPage(QWidget* parent)
     auto* filterLayout = new QHBoxLayout;
 
     pathFilterEdit_ = new QLineEdit;
+    pathFilterEdit_->setObjectName("comparisonPathFilter");
     pathFilterEdit_->setPlaceholderText(QString::fromUtf8("Фільтр за шляхом…"));
     pathFilterEdit_->setMinimumHeight(32);
     pathFilterEdit_->setProperty("role", "inputField");
     filterLayout->addWidget(pathFilterEdit_);
 
     kindFilterCombo_ = new QComboBox;
+    kindFilterCombo_->setObjectName("comparisonKindFilter");
     kindFilterCombo_->setMinimumHeight(32);
     kindFilterCombo_->setProperty("role", "inputField");
     kindFilterCombo_->addItem(QString::fromUtf8("Усі види"), -1);
@@ -57,10 +60,12 @@ ComparisonPage::ComparisonPage(QWidget* parent)
     filterLayout->addWidget(kindFilterCombo_);
 
     showUnknownCheck_ = new QCheckBox(QString::fromUtf8("Невідомі"));
+    showUnknownCheck_->setObjectName("comparisonShowUnknown");
     showUnknownCheck_->setChecked(true);
     filterLayout->addWidget(showUnknownCheck_);
 
     compareButton_ = new QPushButton(QString::fromUtf8("Порівняти"));
+    compareButton_->setObjectName("comparisonCompareButton");
     compareButton_->setMinimumHeight(32);
     compareButton_->setProperty("role", "primaryAction");
     filterLayout->addWidget(compareButton_);
@@ -69,11 +74,12 @@ ComparisonPage::ComparisonPage(QWidget* parent)
 
     // --- Підсумок ---
     summaryLabel_ = new QLabel;
-    summaryLabel_->setObjectName("statusPill");
+    summaryLabel_->setObjectName("comparisonSummaryLabel");
     mainLayout->addWidget(summaryLabel_);
 
     // --- Таблиця змін ---
     reviewTable_ = new QTableWidget;
+    reviewTable_->setObjectName("comparisonReviewTable");
     reviewTable_->setColumnCount(5);
     reviewTable_->setHorizontalHeaderLabels({
         QString::fromUtf8("Функція"),
@@ -101,8 +107,14 @@ ComparisonPage::ComparisonPage(QWidget* parent)
 // D-H01: запуск порівняння
 void ComparisonPage::onCompareRequested()
 {
-    // DEMO: перебудовуємо звіт із фікстурних даних
-    setReport(makeDemoComparisonReport(), /*isDemo=*/true);
+    if (isDemo_) {
+        // У демо-режимі перебудовуємо звіт із фікстурних даних
+        setReport(makeDemoComparisonReport(), /*isDemo=*/true);
+    } else {
+        // У реальному режимі звіт НЕ замінюється демо-даними!
+        emit compareRebuildRequested(baseOid_, targetOid_);
+        emit compareRequested();
+    }
 }
 
 // D-H02: фільтрація таблиці через спільний алгоритм ядра filterReviewItems із збереженням оригінальних індексів [P1, P2]
@@ -141,13 +153,33 @@ void ComparisonPage::onTableRowSelected(int row, int /*column*/)
     }
 }
 
-void ComparisonPage::setReport(const ComparisonReport& report, bool isDemo)
+void ComparisonPage::setReport(const ComparisonReport& report, bool isDemo,
+                               const QString& baseOid, const QString& targetOid)
 {
     currentReport_ = report;
     isDemo_ = isDemo;
     if (demoBadge_) {
         demoBadge_->setVisible(isDemo_);
     }
+
+    if (!baseOid.isEmpty()) {
+        baseOid_ = baseOid;
+    } else if (report.base && report.base->parsed && report.base->parsed->source &&
+               report.base->parsed->source->commitOid.has_value()) {
+        baseOid_ = QString::fromStdString(*report.base->parsed->source->commitOid);
+    } else if (!report.baseId.empty()) {
+        baseOid_ = QString::fromStdString(report.baseId);
+    }
+
+    if (!targetOid.isEmpty()) {
+        targetOid_ = targetOid;
+    } else if (report.target && report.target->parsed && report.target->parsed->source &&
+               report.target->parsed->source->commitOid.has_value()) {
+        targetOid_ = QString::fromStdString(*report.target->parsed->source->commitOid);
+    } else if (!report.targetId.empty()) {
+        targetOid_ = QString::fromStdString(report.targetId);
+    }
+
     onReviewFilterChanged();
 }
 

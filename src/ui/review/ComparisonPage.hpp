@@ -23,7 +23,8 @@ public:
     explicit ComparisonPage(QWidget* parent = nullptr);
 
     /// Завантажити звіт для відображення.
-    void setReport(const xray::review::ComparisonReport& report, bool isDemo = false);
+    void setReport(const xray::review::ComparisonReport& report, bool isDemo = false,
+                   const QString& baseOid = {}, const QString& targetOid = {});
 
     /// Отримати поточний звіт.
     const xray::review::ComparisonReport& currentReport() const { return currentReport_; }
@@ -31,9 +32,18 @@ public:
     /// Чи є звіт демонстраційним.
     bool isDemo() const { return isDemo_; }
 
+    const QString& baseOid() const { return baseOid_; }
+    const QString& targetOid() const { return targetOid_; }
+
 signals:
     /// D-H03: вибір рядка таблиці → відкрити картку зміни (передає оригінальний індекс сутності у звіті).
     void reviewItemSelected(int index);
+
+    /// Запит на перебудову порівняння для конкретних комітів (MainWindow з'єднує з Coordinator).
+    void compareRebuildRequested(const QString& baseOid, const QString& targetOid);
+
+    /// Запит на порівняння.
+    void compareRequested();
 
 private slots:
     void onCompareRequested();          // D-H01
@@ -61,6 +71,9 @@ private:
     QPushButton*  compareButton_    = nullptr;  // Кнопка порівняти
     QTableWidget* reviewTable_      = nullptr;  // Таблиця змін
     QLabel*       summaryLabel_     = nullptr;
+
+    QString baseOid_;
+    QString targetOid_;
 
     xray::review::ComparisonReport currentReport_;
 };
