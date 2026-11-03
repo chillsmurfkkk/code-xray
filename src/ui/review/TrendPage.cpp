@@ -207,6 +207,7 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
     headerLayout->addWidget(titleLabel);
 
     demoBadge_ = new QLabel(QString::fromUtf8("Демо-режим"));
+    demoBadge_->setObjectName("trendDemoBadge");
     demoBadge_->setStyleSheet(
         "background: #d65d0e; color: #ebdbb2; font-weight: bold; "
         "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
@@ -220,6 +221,7 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
     auto* controlLayout = new QHBoxLayout;
 
     metricCombo_ = new QComboBox;
+    metricCombo_->setObjectName("trendMetricCombo");
     metricCombo_->setMinimumHeight(32);
     metricCombo_->setProperty("role", "inputField");
     metricCombo_->addItem(QString::fromUtf8("Рядки функції"), static_cast<int>(analysis::MetricId::function_lines));
@@ -229,6 +231,7 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
     controlLayout->addWidget(metricCombo_);
 
     targetCombo_ = new QComboBox;
+    targetCombo_->setObjectName("trendTargetCombo");
     targetCombo_->setMinimumHeight(32);
     targetCombo_->setProperty("role", "inputField");
     targetCombo_->addItem(QString::fromUtf8("Окрема функція"), static_cast<int>(TrendAggregation::function));
@@ -239,6 +242,7 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
 
     entityLabel_ = new QLabel(QString::fromUtf8("Сутність:"));
     entityCombo_ = new QComboBox;
+    entityCombo_->setObjectName("trendEntityCombo");
     entityCombo_->setMinimumHeight(32);
     entityCombo_->setProperty("role", "inputField");
     entityCombo_->setMinimumWidth(220);
@@ -248,6 +252,7 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
     controlLayout->addWidget(entityCombo_, /*stretch=*/1);
 
     buildButton_ = new QPushButton(QString::fromUtf8("Побудувати"));
+    buildButton_->setObjectName("trendBuildButton");
     buildButton_->setMinimumHeight(32);
     buildButton_->setProperty("role", "primaryAction");
     controlLayout->addWidget(buildButton_);
@@ -255,7 +260,8 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
     mainLayout->addLayout(controlLayout);
 
     statusLabel_ = new QLabel;
-    statusLabel_->setObjectName("statusPill");
+    statusLabel_->setObjectName("trendStatusLabel");
+    statusLabel_->setProperty("role", "statusPill");
     mainLayout->addWidget(statusLabel_);
 
     // --- Графік ---
@@ -264,6 +270,7 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
 
     // --- Таблиця точок ---
     pointsTable_ = new QTableWidget;
+    pointsTable_->setObjectName("trendPointsTable");
     pointsTable_->setColumnCount(4);
     pointsTable_->setHorizontalHeaderLabels({
         QString::fromUtf8("Коміт"),
@@ -436,6 +443,18 @@ void TrendPage::populateTable(const std::vector<TrendPoint>& points)
         pointsTable_->setItem(row, 3, new QTableWidgetItem(QString::fromStdString(p.reason)));
     }
     pointsTable_->resizeColumnsToContents();
+}
+
+void TrendPage::setStatusText(const QString& text)
+{
+    if (statusLabel_) {
+        statusLabel_->setText(text);
+    }
+}
+
+QString TrendPage::statusText() const
+{
+    return statusLabel_ ? statusLabel_->text() : QString();
 }
 
 } // namespace xray::ui::review

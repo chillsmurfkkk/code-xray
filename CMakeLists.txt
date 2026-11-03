@@ -265,6 +265,12 @@ if(CODE_XRAY_BUILD_APP)
         add_test(NAME coordinator COMMAND coordinator_tests)
         set_tests_properties(coordinator PROPERTIES TIMEOUT 60)
 
+        add_executable(review_ui_tests tests/review/ui_tests.cpp src/app/main_window.cpp)
+        set_target_properties(review_ui_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(review_ui_tests PRIVATE xray_ui xray_review xray_history xray_code xray_analysis libgit2::libgit2package Qt6::Test)
+        add_test(NAME review_ui COMMAND review_ui_tests)
+        set_tests_properties(review_ui PROPERTIES TIMEOUT 30)
+
         add_executable(gui_design_tests tests/ui/design_tests.cpp src/app/main_window.cpp)
         target_link_libraries(gui_design_tests PRIVATE xray_ui xray_code)
         add_dependencies(gui_design_tests code-xray)

@@ -272,8 +272,43 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     });
 
     connect(coordinator_, &Coordinator::comparisonCompleted, this, [this, navigation](const review::ComparisonReport& rep) {
-        comparisonPage_->setReport(rep, /*isDemo=*/false);
-        exportPage_->setReport(rep);
+        comparisonPage_->setReport(rep, /*isDemo=*/false, QString::fromStdString(rep.baseId), QString::fromStdString(rep.targetId));
+        exportPage_->setReport(rep, /*isDemo=*/false);
+
+        // Оновлюємо доступні цілі для сторінки динаміки (TrendPage)
+        std::vector<std::string> funcKeys;
+        std::vector<std::string> fileKeys;
+        if (rep.target && rep.target->parsed) {
+            for (const auto& unit : rep.target->parsed->units) {
+                fileKeys.push_back(unit.relativePath);
+                for (const auto& fn : unit.functions) {
+                    funcKeys.push_back(fn->describe());
+                }
+            }
+        }
+        if (funcKeys.empty()) {
+            for (const auto& it : rep.items) {
+                if (!it.entityKey.empty()) {
+                    funcKeys.push_back(it.entityKey);
+                }
+                for (const auto& sr : it.sourceRefs) {
+                    if (!sr.relativePath.empty()) {
+                        fileKeys.push_back(sr.relativePath);
+                    }
+                }
+            }
+        }
+        std::sort(funcKeys.begin(), funcKeys.end());
+        funcKeys.erase(std::unique(funcKeys.begin(), funcKeys.end()), funcKeys.end());
+        std::sort(fileKeys.begin(), fileKeys.end());
+        fileKeys.erase(std::unique(fileKeys.begin(), fileKeys.end()), fileKeys.end());
+        if (!funcKeys.empty() || !fileKeys.empty()) {
+            trendPage_->setAvailableTargets(funcKeys, fileKeys);
+        }
+        if (!rep.targetId.empty()) {
+            trendPage_->setRepositoryTip(QString::fromStdString(rep.targetId));
+        }
+
         navigation->setCurrentPage(ui::Section::review, 0);
     });
 
@@ -284,10 +319,12 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
 
     connect(coordinator_, &Coordinator::operationFailed, this, [this](const QString& op, const QString& err) {
         statusBar()->showMessage(op + ": " + err, 7000);
+        trendPage_->setStatusText(QString::fromUtf8("Помилка: ") + err);
     });
 
     connect(coordinator_, &Coordinator::operationCancelled, this, [this](const QString& op) {
         statusBar()->showMessage(op + QString::fromUtf8(" скасовано"), 4000);
+        trendPage_->setStatusText(QString::fromUtf8("Операцію скасовано"));
     });
 
     connect(coordinator_, &Coordinator::busyChanged, commitsPage_, &ui::history::CommitsPage::setBusy);
@@ -306,6 +343,18 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
 
     connect(commitsPage_, &ui::history::CommitsPage::compareRequested, this,
             [this](const QString& base, const QString& target) {
+        code::FileSelection selection;
+        if (!resolveFileSelection(selection)) return;
+        coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        coordinator_->setFileSelection(std::move(selection));
+        coordinator_->compareCommits(base.toStdString(), target.toStdString());
+    });
+
+    connect(comparisonPage_, &ui::review::ComparisonPage::compareRebuildRequested, this,
+            [this](const QString& base, const QString& target) {
+        if (base.isEmpty() || target.isEmpty()) {
+            return;
+        }
         code::FileSelection selection;
         if (!resolveFileSelection(selection)) return;
         coordinator_->setAnalysisProfile(analysisController_->session().profile());
