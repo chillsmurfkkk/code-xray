@@ -38,6 +38,8 @@ private:
     IconButton* pagesToggle_ = nullptr;
     IconButton* themeButton_ = nullptr;
     IconButton* codeButton_ = nullptr;
+    IconButton* analysisButton_ = nullptr;
+    IconButton* historyButton_ = nullptr;
     IconButton* compareButton_ = nullptr;
 
     QLabel* sectionTitle_ = nullptr;

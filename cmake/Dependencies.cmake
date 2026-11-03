@@ -1,4 +1,5 @@
-find_package(Qt6 6.11.1 EXACT CONFIG REQUIRED COMPONENTS Widgets)
+set(CODE_XRAY_QT_VERSION "6.11.1" CACHE STRING "Exact Qt version (local SDK override)")
+find_package(Qt6 ${CODE_XRAY_QT_VERSION} EXACT CONFIG REQUIRED COMPONENTS Widgets)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
 find_package(libgit2 CONFIG REQUIRED)
 

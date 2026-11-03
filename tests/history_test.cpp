@@ -245,6 +245,224 @@ int main() {
         std::cout << "  [OK] groupRecords grouped changes by Status into 2 groups\n";
     }
 
+    std::cout << "\n4. Testing MergeCommitQuery\n";
+    {
+        // Add a merge commit (2 parents) to mockCommits
+        CommitRecord mergeCommit{ "oid_merge", {"oid4", "oid3"}, "merger", "m@test.com", t4, t4, "Merge branch X" };
+        std::vector<CommitRecord> mixedCommits = { mergeCommit, mockCommits[0], mockCommits[1], mockCommits[2], mockCommits[3] };
+
+        MergeCommitQuery mergeOnly(true);
+        auto mergeResult = executeQuery(mergeOnly, mixedCommits);
+        ensure(mergeResult.size() == 1 && mergeResult[0].oid == "oid_merge", "MergeCommitQuery(true) should return only merge commits");
+        std::cout << "  [OK] MergeCommitQuery(true) returned only merge commits\n";
+
+        MergeCommitQuery nonMergeOnly(false);
+        auto nonMergeResult = executeQuery(nonMergeOnly, mixedCommits);
+        ensure(nonMergeResult.size() == 4, "MergeCommitQuery(false) should return only non-merge commits");
+        std::cout << "  [OK] MergeCommitQuery(false) returned only non-merge commits\n";
+
+        bool caughtMergeError = false;
+        try {
+            MergeCommitQuery bad(true, 1);
+        }
+        catch (const std::invalid_argument&) {
+            caughtMergeError = true;
+        }
+        ensure(caughtMergeError, "MergeCommitQuery(true, 1) must throw - minParents < 2 while onlyMerges=true");
+        std::cout << "  [OK] MergeCommitQuery(true, 1) correctly threw invalid_argument\n";
+    }
+
+    std::cout << "\n5. Testing LinearHistorySelection\n";
+    {
+        // Full chain: all 4 commits present, no truncation.
+        LinearHistorySelection linSel("oid4");
+        auto linResult = executeSelection(linSel, mockCommits);
+        ensure(linResult.size() == 4, "LinearHistorySelection from oid4 should follow chain to oid1");
+        ensure(linResult[0].oid == "oid4", "LinearHistorySelection first commit must be oid4");
+        ensure(linResult[3].oid == "oid1", "LinearHistorySelection last commit must be oid1");
+        std::cout << "  [OK] LinearHistorySelection traversed full chain oid4->oid3->oid2->oid1\n";
+
+        // Partial chain starting from oid2.
+        LinearHistorySelection linSel2("oid2");
+        auto linResult2 = executeSelection(linSel2, mockCommits);
+        ensure(linResult2.size() == 2, "LinearHistorySelection from oid2 should return oid2 and oid1");
+        ensure(linResult2[0].oid == "oid2" && linResult2[1].oid == "oid1", "LinearHistorySelection from oid2 chain mismatch");
+        std::cout << "  [OK] LinearHistorySelection(oid2) traversed partial chain oid2->oid1\n";
+
+        // Empty OID rejected at construction time.
+        bool caughtEmptyOid = false;
+        try {
+            LinearHistorySelection badSel("");
+        }
+        catch (const std::invalid_argument&) {
+            caughtEmptyOid = true;
+        }
+        ensure(caughtEmptyOid, "LinearHistorySelection must throw for empty start OID");
+        std::cout << "  [OK] LinearHistorySelection correctly rejected empty start OID\n";
+
+        // Start OID missing from the provided commits.
+        bool caughtNotFound = false;
+        try {
+            LinearHistorySelection notFoundSel("nonexistent_oid");
+            executeSelection(notFoundSel, mockCommits);
+        }
+        catch (const std::invalid_argument&) {
+            caughtNotFound = true;
+        }
+        ensure(caughtNotFound, "LinearHistorySelection must throw when start OID not found");
+        std::cout << "  [OK] LinearHistorySelection correctly threw when start OID not found\n";
+
+        // Empty commit list must throw (cannot verify start OID exists).
+        bool caughtEmptyList = false;
+        try {
+            LinearHistorySelection emptySel("oid4");
+            executeSelection(emptySel, {});
+        }
+        catch (const std::invalid_argument&) {
+            caughtEmptyList = true;
+        }
+        ensure(caughtEmptyList, "LinearHistorySelection must throw when commit list is empty");
+        std::cout << "  [OK] LinearHistorySelection correctly threw on empty commit list\n";
+
+        // Truncated graph: oid3 references oid2 as parent but oid2 is absent.
+        std::vector<CommitRecord> truncated = { mockCommits[0], mockCommits[1] }; // oid4, oid3; oid2 missing
+        bool caughtTruncated = false;
+        try {
+            LinearHistorySelection truncSel("oid4");
+            executeSelection(truncSel, truncated);
+        }
+        catch (const std::invalid_argument&) {
+            caughtTruncated = true;
+        }
+        ensure(caughtTruncated, "LinearHistorySelection must throw when parent OID is missing (truncated graph)");
+        std::cout << "  [OK] LinearHistorySelection correctly threw on truncated graph (missing parent)\n";
+    }
+
+    std::cout << "\n6. Testing computeCodeChurn\n";
+    {
+        // mockChanges: all records have known line counts -> hasUnknownLineCounts must be false.
+        CodeChurn churn = computeCodeChurn(mockChanges);
+        // modified(+30,-0), modified(+10,-2), modified(+20,-5), added(+15,-0)
+        ensure(churn.totalAddedLines == 75, "computeCodeChurn totalAddedLines mismatch");
+        ensure(churn.totalDeletedLines == 7, "computeCodeChurn totalDeletedLines mismatch");
+        ensure(churn.netLines == 68, "computeCodeChurn netLines mismatch");
+        ensure(churn.binaryFilesCount == 0, "computeCodeChurn binaryFilesCount should be 0");
+        ensure(churn.modifiedFilesCount == 4, "computeCodeChurn modifiedFilesCount should be 4");
+        ensure(!churn.hasUnknownLineCounts, "computeCodeChurn hasUnknownLineCounts should be false when all counts known");
+        std::cout << "  [OK] computeCodeChurn correctly aggregated lines and file counts\n";
+
+        // Empty input: all zeros, no unknown counts.
+        CodeChurn emptyChurn = computeCodeChurn({});
+        ensure(emptyChurn.totalAddedLines == 0 && emptyChurn.netLines == 0, "computeCodeChurn on empty changes should be zero");
+        ensure(!emptyChurn.hasUnknownLineCounts, "computeCodeChurn on empty input should not set hasUnknownLineCounts");
+        std::cout << "  [OK] computeCodeChurn on empty input returned zero CodeChurn\n";
+
+        // Record with nullopt line counts: hasUnknownLineCounts must be set.
+        ChangeRecord unknownRecord{ "oid_u", std::nullopt, std::nullopt, "file.bin", ChangeStatus::modified,
+                                    std::nullopt, std::nullopt };
+        CodeChurn unknownChurn = computeCodeChurn({ unknownRecord });
+        ensure(unknownChurn.totalAddedLines == 0, "computeCodeChurn with nullopt lines should not add to total");
+        ensure(unknownChurn.hasUnknownLineCounts, "computeCodeChurn must set hasUnknownLineCounts when addedLines/deletedLines are nullopt");
+        std::cout << "  [OK] computeCodeChurn correctly set hasUnknownLineCounts for record with nullopt line stats\n";
+    }
+
+    std::cout << "\n7. Testing isAncestor\n";
+    {
+        // Standard ancestry cases with complete graph.
+        ensure(isAncestor(mockCommits, "oid1", "oid4"), "oid1 must be ancestor of oid4");
+        std::cout << "  [OK] isAncestor(oid1, oid4) = true\n";
+
+        ensure(!isAncestor(mockCommits, "oid4", "oid1"), "oid4 must NOT be ancestor of oid1");
+        std::cout << "  [OK] isAncestor(oid4, oid1) = false\n";
+
+        ensure(isAncestor(mockCommits, "oid2", "oid4"), "oid2 must be ancestor of oid4");
+        std::cout << "  [OK] isAncestor(oid2, oid4) = true\n";
+
+        // Reflexive case: valid only when both OIDs are found in commits.
+        ensure(isAncestor(mockCommits, "oid3", "oid3"), "same OID must be its own ancestor");
+        std::cout << "  [OK] isAncestor(oid3, oid3) = true (reflexive, both OIDs verified)\n";
+
+        // Empty OID rejected before map lookup.
+        bool caughtEmptyAncestor = false;
+        try {
+            (void)isAncestor(mockCommits, "", "oid4");
+        }
+        catch (const std::invalid_argument&) {
+            caughtEmptyAncestor = true;
+        }
+        ensure(caughtEmptyAncestor, "isAncestor must throw for empty ancestor OID");
+        std::cout << "  [OK] isAncestor threw for empty ancestor OID\n";
+
+        // Missing ancestor OID must throw (previously gave false confidence).
+        bool caughtMissingAncestor = false;
+        try {
+            (void)isAncestor(mockCommits, "nonexistent_ancestor", "oid4");
+        }
+        catch (const std::invalid_argument&) {
+            caughtMissingAncestor = true;
+        }
+        ensure(caughtMissingAncestor, "isAncestor must throw when ancestor OID not found in commits");
+        std::cout << "  [OK] isAncestor threw for missing ancestor OID\n";
+
+        // Missing descendant OID must throw.
+        bool caughtMissingDescendant = false;
+        try {
+            (void)isAncestor(mockCommits, "oid1", "nonexistent");
+        }
+        catch (const std::invalid_argument&) {
+            caughtMissingDescendant = true;
+        }
+        ensure(caughtMissingDescendant, "isAncestor must throw when descendant OID not found");
+        std::cout << "  [OK] isAncestor threw for missing descendant OID\n";
+
+        // Truncated graph: intermediate commit missing -> must throw, not silently return false.
+        // oid4->oid3 present; oid2 absent; isAncestor(oid1, oid4) would need oid2 to continue.
+        std::vector<CommitRecord> truncated2 = { mockCommits[0], mockCommits[1] }; // oid4, oid3
+        // Add oid1 so both endpoints exist but oid2 is still missing in the chain.
+        truncated2.push_back(mockCommits[3]); // oid1
+        bool caughtTruncatedGraph = false;
+        try {
+            (void)isAncestor(truncated2, "oid1", "oid4");
+        }
+        catch (const std::invalid_argument&) {
+            caughtTruncatedGraph = true;
+        }
+        ensure(caughtTruncatedGraph, "isAncestor must throw on truncated graph (intermediate commit missing)");
+        std::cout << "  [OK] isAncestor threw on truncated graph instead of giving uncertain false\n";
+    }
+
+    std::cout << "\n8. Testing filterChangesByStatus\n";
+    {
+        auto modifiedOnly = filterChangesByStatus(mockChanges, ChangeStatus::modified);
+        ensure(modifiedOnly.size() == 3, "filterChangesByStatus(modified) should return 3 records");
+        std::cout << "  [OK] filterChangesByStatus returned 3 modified records\n";
+
+        auto addedOnly = filterChangesByStatus(mockChanges, ChangeStatus::added);
+        ensure(addedOnly.size() == 1, "filterChangesByStatus(added) should return 1 record");
+        ensure(addedOnly[0].commitOid == "oid1", "filterChangesByStatus(added) record should be from oid1");
+        std::cout << "  [OK] filterChangesByStatus returned 1 added record\n";
+
+        auto deletedOnly = filterChangesByStatus(mockChanges, ChangeStatus::deleted);
+        ensure(deletedOnly.empty(), "filterChangesByStatus(deleted) should return 0 records");
+        std::cout << "  [OK] filterChangesByStatus returned 0 deleted records (none in mock data)\n";
+    }
+
+    std::cout << "\n9. Testing sortCommitsChronologically\n";
+    {
+        // mockCommits is ordered newest-first: oid4(t4), oid3(t3), oid2(t2), oid1(t1)
+        auto ascending = sortCommitsChronologically(mockCommits, true);
+        ensure(ascending[0].oid == "oid1" && ascending[3].oid == "oid4", "sortCommitsChronologically ascending failed");
+        std::cout << "  [OK] sortCommitsChronologically(ascending=true): oid1->oid2->oid3->oid4\n";
+
+        auto descending = sortCommitsChronologically(mockCommits, false);
+        ensure(descending[0].oid == "oid4" && descending[3].oid == "oid1", "sortCommitsChronologically descending failed");
+        std::cout << "  [OK] sortCommitsChronologically(ascending=false): oid4->oid3->oid2->oid1\n";
+
+        // Original must be unchanged (function takes by value)
+        ensure(mockCommits[0].oid == "oid4", "sortCommitsChronologically must not modify original vector");
+        std::cout << "  [OK] sortCommitsChronologically did not modify original vector\n";
+    }
+
     std::cout << "  PR #1 VERIFICATION PASSED (OOP BASE & REVISION CORE)\n";
 
     return 0;

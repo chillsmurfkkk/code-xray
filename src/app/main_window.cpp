@@ -1,7 +1,15 @@
 #include "main_window.hpp"
-#include "ui/code/structure_page.hpp"
+#include "app/analysis_controller.hpp"
+#include "app/coordinator.hpp"
+#include "ui/analysis/workspace.hpp"
+
 #include "ui/shared/navigation.hpp"
 #include "ui/shared/theme.hpp"
+
+#include "ui/code/structure_page.hpp"
+#include "ui/code/source_page.hpp"
+#include "ui/code/file_selection_page.hpp"
+#include "ui/code/diagnostics_page.hpp"
 
 #include "ui/review/ComparisonPage.hpp"
 #include "ui/review/TrendPage.hpp"
@@ -9,11 +17,17 @@
 #include "ui/review/ExportPage.hpp"
 #include "ui/review/review_fixtures.hpp"
 
+#include "ui/history/CommitsPage.hpp"
+#include "ui/history/HistoryFiltersPage.hpp"
+#include "ui/history/CodeChurnPage.hpp"
+#include "ui/history/AncestryPage.hpp"
+
 #include "code/api.hpp"
 #include "ui/code/demo_snapshot.hpp"
 
+#include <algorithm>
 #include <exception>
-#include <filesystem>
+#include <chrono>
 #include <memory>
 #include <utility>
 #include <variant>
@@ -22,10 +36,11 @@
 #include <QHBoxLayout>
 #include <QScreen>
 #include <QFileDialog>
-#include <QMessageBox>
+#include <QMetaObject>
 #include <QStatusBar>
 #include <QThread>
 #include <QStackedWidget>
+#include <QMessageBox>
 
 namespace xray::app {
 
@@ -48,10 +63,28 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
 
     // Сторінка розділу Код
     structure_ = new ui::StructurePage(contentStack_);
-    if (qApp->arguments().contains("--demo")) {
-        structure_->setSnapshot(ui::makeDemoSnapshot(), true);
-    }
     contentStack_->addWidget(structure_);
+
+    source_ = new ui::SourcePage(contentStack_);
+    contentStack_->addWidget(source_);
+
+    fileSelection_ = new ui::FileSelectionPage(contentStack_);
+    contentStack_->addWidget(fileSelection_);
+
+    diagnostics_ = new ui::DiagnosticsPage(contentStack_);
+    contentStack_->addWidget(diagnostics_);
+
+    analysisController_ = new AnalysisController(this);
+    coordinator_ = new Coordinator(this);
+    analysisPages_ = new ui::analysis_pages::Workspace(analysisController_->session(), contentStack_);
+    contentStack_->addWidget(analysisPages_);
+    connect(analysisController_, &AnalysisController::progressChanged,
+            analysisPages_, &ui::analysis_pages::Workspace::setProgress);
+    connect(analysisPages_, &ui::analysis_pages::Workspace::cancelRequested,
+            analysisController_, &AnalysisController::cancel);
+    if (qApp->arguments().contains("--demo")) {
+        setSnapshot(ui::makeDemoSnapshot(), true);
+    }
 
     // Сторінки розділу Порівняння (Модуль D)
     comparisonPage_ = new ui::review::ComparisonPage(contentStack_);
@@ -64,6 +97,17 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     contentStack_->addWidget(changeCardPage_);
     contentStack_->addWidget(exportPage_);
 
+    // Сторінки розділу Історія (Модуль C)
+    commitsPage_        = new ui::history::CommitsPage(contentStack_);
+    historyFiltersPage_ = new ui::history::HistoryFiltersPage(contentStack_);
+    codeChurnPage_      = new ui::history::CodeChurnPage(contentStack_);
+    ancestryPage_       = new ui::history::AncestryPage(contentStack_);
+
+    contentStack_->addWidget(commitsPage_);
+    contentStack_->addWidget(historyFiltersPage_);
+    contentStack_->addWidget(codeChurnPage_);
+    contentStack_->addWidget(ancestryPage_);
+
     layout->addWidget(navigation);
     layout->addWidget(contentStack_, 1);
     setCentralWidget(central);
@@ -71,8 +115,25 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     // Навігація між сторінками
     connect(navigation, &ui::NavigationPanel::pageSelected, this, [this](ui::Section section, int pageIndex) {
         if (section == ui::Section::code) {
-            if (pageIndex == 2) { // Структура
+            if (pageIndex == 0) {
+                contentStack_->setCurrentWidget(source_);
+            } else if (pageIndex == 1) {
+                contentStack_->setCurrentWidget(fileSelection_);
+            } else if (pageIndex == 2) {
                 contentStack_->setCurrentWidget(structure_);
+            } else if (pageIndex == 3) {
+                contentStack_->setCurrentWidget(diagnostics_);
+            }
+        } else if (section == ui::Section::analysis) {
+            analysisPages_->setCurrentPage(pageIndex);
+            contentStack_->setCurrentWidget(analysisPages_);
+        } else if (section == ui::Section::history) {
+            switch (pageIndex) {
+            case 0: contentStack_->setCurrentWidget(commitsPage_);        break;
+            case 1: contentStack_->setCurrentWidget(historyFiltersPage_); break;
+            case 2: contentStack_->setCurrentWidget(codeChurnPage_);      break;
+            case 3: contentStack_->setCurrentWidget(ancestryPage_);       break;
+            default: break;
             }
         } else if (section == ui::Section::review) {
             switch (pageIndex) {
@@ -101,14 +162,15 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         [this]() {
             const QString directory = QFileDialog::getExistingDirectory(
                 this,
-                QString::fromUtf8("Виберіть папку з кодом")
+                QString::fromUtf8("Виберіть папку з кодом"),
+                source_->directory()
             );
 
             if (directory.isEmpty()) {
                 return;
             }
 
-            loadDirectory(directory, structure_);
+            loadDirectory(directory);
         }
     );
 
@@ -116,16 +178,172 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         structure_,
         &ui::StructurePage::cancelRequested,
         this,
-        [this]() {
-            if (sourceThread_) {
-                sourceStop_.request_stop();
+        &MainWindow::cancelSource
+    );
 
-                statusBar()->showMessage(
-                    QString::fromUtf8("Скасовуємо відкриття…")
-                );
+    connect(
+        source_,
+        &ui::SourcePage::cancelRequested,
+        this,
+        &MainWindow::cancelSource
+    );
+
+    connect(
+        source_,
+        &ui::SourcePage::browseDirectoryRequested,
+        this,
+        [this]() {
+            const QString directory = QFileDialog::getExistingDirectory(
+                this,
+                QString::fromUtf8("Виберіть папку з кодом"),
+                source_->directory()
+            );
+
+            if (!directory.isEmpty()) {
+                source_->setDirectory(directory);
             }
         }
     );
+
+    connect(
+        source_,
+        &ui::SourcePage::browseFilesRequested,
+        this,
+        [this]() {
+            source_->addFiles(QFileDialog::getOpenFileNames(
+                this, QString::fromUtf8("Виберіть файли всередині кореневої папки"),
+                source_->directory(),
+                QString::fromUtf8("C++ (*.cpp *.cc *.cxx *.h *.hpp *.hxx);;Усі файли (*)")
+            ));
+        }
+    );
+
+    connect(
+        source_,
+        &ui::SourcePage::scanRequested,
+        this,
+        [this]() {
+            loadSource(source_->sourceRequest());
+        }
+    );
+
+    connect(source_, &ui::SourcePage::structureRequested, this, [navigation]() {
+        navigation->setCurrentPage(ui::Section::code, 2);
+    });
+
+    connect(diagnostics_, &ui::DiagnosticsPage::reparseRequested, this, [this, navigation] {
+        navigation->setCurrentPage(ui::Section::code, 0);
+        source_->requestScan();
+    });
+    connect(diagnostics_, &ui::DiagnosticsPage::openCodeRequested, this,
+            [this, navigation](const QString& path, int line) {
+        if (structure_->openLocation(path, line)) navigation->setCurrentPage(ui::Section::code, 2);
+    });
+
+    // Координатор: зв'язок Git-пайплайну зі сторінками історії та порівняння
+    connect(coordinator_, &Coordinator::statusMessage, this, [this](const QString& msg, int timeout) {
+        statusBar()->showMessage(msg, timeout);
+    });
+
+    // A new repository is being opened: drop all data that belongs to the
+    // previous repository so a failed open cannot leave stale commits visible.
+    connect(coordinator_, &Coordinator::repositoryOpening, this, [this]() {
+        commitsPage_->setCommits({}, /*isDemo=*/false);
+        historyFiltersPage_->setCommits({}, /*isDemo=*/false);
+        codeChurnPage_->setChanges({}, /*isDemo=*/false);
+        ancestryPage_->setCommits({}, /*isDemo=*/false);
+        trendPage_->setRepositoryTip(QString{});
+        trendPage_->setAvailableTargets({}, {});
+    });
+
+    connect(coordinator_, &Coordinator::repositoryQueried, this, [this](const history::HistoryResult& res) {
+        commitsPage_->setCommits(res.commits, /*isDemo=*/false);
+        historyFiltersPage_->setCommits(res.commits, /*isDemo=*/false);
+        codeChurnPage_->setChanges(res.changes, /*isDemo=*/false);
+        ancestryPage_->setCommits(res.commits, /*isDemo=*/false);
+        trendPage_->setRepositoryTip(res.commits.empty()
+            ? QString{}
+            : QString::fromStdString(res.commits.front().oid));
+    });
+
+    connect(coordinator_, &Coordinator::commitSnapshotLoaded, this, [this, navigation](auto snapshot) {
+        setSnapshot(snapshot, /*demonstration=*/false);
+        navigation->setCurrentPage(ui::Section::code, 2);
+    });
+
+    connect(coordinator_, &Coordinator::comparisonCompleted, this, [this, navigation](const review::ComparisonReport& rep) {
+        comparisonPage_->setReport(rep, /*isDemo=*/false);
+        exportPage_->setReport(rep);
+        navigation->setCurrentPage(ui::Section::review, 0);
+    });
+
+    connect(coordinator_, &Coordinator::trendCompleted, this, [this, navigation](const review::TrendReport& rep) {
+        trendPage_->setTrendReport(rep, /*isDemo=*/false);
+        navigation->setCurrentPage(ui::Section::review, 1);
+    });
+
+    connect(coordinator_, &Coordinator::operationFailed, this, [this](const QString& op, const QString& err) {
+        statusBar()->showMessage(op + ": " + err, 7000);
+    });
+
+    connect(coordinator_, &Coordinator::operationCancelled, this, [this](const QString& op) {
+        statusBar()->showMessage(op + QString::fromUtf8(" скасовано"), 4000);
+    });
+
+    connect(coordinator_, &Coordinator::busyChanged, commitsPage_, &ui::history::CommitsPage::setBusy);
+    connect(coordinator_, &Coordinator::progressChanged, commitsPage_, &ui::history::CommitsPage::setProgress);
+
+    connect(commitsPage_, &ui::history::CommitsPage::openRepositoryRequested, this, [this]() {
+        const QString directory = QFileDialog::getExistingDirectory(
+            this,
+            QString::fromUtf8("Виберіть папку Git-репозиторію"),
+            source_->directory()
+        );
+        if (!directory.isEmpty()) {
+            coordinator_->openRepository(std::filesystem::path(directory.toStdWString()));
+        }
+    });
+
+    connect(commitsPage_, &ui::history::CommitsPage::compareRequested, this,
+            [this](const QString& base, const QString& target) {
+        code::FileSelection selection;
+        if (!resolveFileSelection(selection)) return;
+        coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        coordinator_->setFileSelection(std::move(selection));
+        coordinator_->compareCommits(base.toStdString(), target.toStdString());
+    });
+
+    connect(commitsPage_, &ui::history::CommitsPage::trendRequested, this,
+            [this](const QString& tip) {
+        code::FileSelection selection;
+        if (!resolveFileSelection(selection)) return;
+        coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        coordinator_->setFileSelection(std::move(selection));
+        coordinator_->buildTrend(tip.toStdString(), 20);
+    });
+
+    connect(commitsPage_, &ui::history::CommitsPage::commitSnapshotRequested, this,
+            [this](const QString& oid) {
+        code::FileSelection selection;
+        if (!resolveFileSelection(selection)) return;
+        coordinator_->setFileSelection(std::move(selection));
+        coordinator_->loadCommitSnapshot(oid.toStdString());
+    });
+
+    connect(trendPage_, &ui::review::TrendPage::trendRebuildRequested, this,
+            [this](const QString& tip, analysis::MetricId metricId,
+                   review::TrendAggregation aggregation, const QString& entityKey) {
+        code::FileSelection selection;
+        if (!resolveFileSelection(selection)) return;
+        coordinator_->setAnalysisProfile(analysisController_->session().profile());
+        coordinator_->setFileSelection(std::move(selection));
+        coordinator_->buildTrend(tip.toStdString(), 20, metricId, aggregation,
+                                 entityKey.toStdString());
+    });
+
+    connect(commitsPage_, &ui::history::CommitsPage::cancelRequested, this, [this]() {
+        coordinator_->cancel();
+    });
 
     connect(navigation, &ui::NavigationPanel::themeToggleRequested, this, [this, navigation]() {
         theme_ = theme_ == ui::Theme::dark ? ui::Theme::light : ui::Theme::dark;
@@ -135,33 +353,87 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     });
 }
 
-void MainWindow::loadDirectory(
-    const QString& directory,
-    ui::StructurePage* structure
-) {
+void MainWindow::loadDirectory(const QString& directory) {
     if (sourceThread_) {
         return;
     }
 
-    code::SourceRequest request;
-    request.root = std::filesystem::path(directory.toStdU16String());
+    source_->setDirectory(directory);
+    loadSource(source_->sourceRequest());
+
+    if (coordinator_) {
+        coordinator_->openRepository(std::filesystem::path(directory.toStdWString()));
+    }
+}
+
+bool MainWindow::resolveFileSelection(code::FileSelection& selection) {
+    // Git operations must analyse the same subset of files as the source page:
+    // keep the user-selected relative paths and only fill in the filters.
+    const auto sourceSelection = source_->sourceRequest().selection;
+    if (selection.relativePaths.empty()) {
+        selection.relativePaths = sourceSelection.relativePaths;
+    }
+
+    QString selectionError;
+    if (!fileSelection_->applyTo(selection, selectionError)) {
+        QMessageBox::warning(
+            this,
+            QString::fromUtf8("Некоректний відбір файлів"),
+            selectionError
+        );
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::loadSource(code::SourceRequest request) {
+    if (sourceThread_) return;
+
+    if (!resolveFileSelection(request.selection)) {
+        return;
+    }
+
+    // Keep the coordinator in sync with the exact scan selection so later Git
+    // operations (compare, trend, commit snapshot) reuse the same paths.
+    if (coordinator_) {
+        coordinator_->setFileSelection(request.selection);
+    }
 
     sourceStop_ = std::stop_source{};
     const auto token = sourceStop_.get_token();
+    const auto jobId = ++sourceJobId_;
 
     using LoadResult = Result<code::ParsedSnapshot>;
     auto result = std::make_shared<LoadResult>(Cancelled{});
 
-    structure->setLoading(true);
+    structure_->setLoading(true);
+    source_->setLoading(true);
+    fileSelection_->setEnabled(false);
+    diagnostics_->setLoading(true);
     statusBar()->showMessage(
         QString::fromUtf8("Збираємо файли та розбираємо код…")
     );
 
     sourceThread_ = QThread::create(
-        [request = std::move(request), token, result]() {
+        [this, request = std::move(request), token, result, jobId]() {
             try {
+                auto lastDelivery = std::chrono::steady_clock::now();
+                std::string lastStage;
                 JobContext context;
+                context.jobId = jobId;
                 context.stopToken = token;
+                context.onProgress = [this, jobId, &lastDelivery, &lastStage](const Progress& progress) {
+                    const auto now = std::chrono::steady_clock::now();
+                    const bool stageFinished = progress.total && progress.completed >= *progress.total;
+                    if (lastStage == progress.stage && !stageFinished
+                        && now - lastDelivery < std::chrono::milliseconds(50)) return;
+                    lastStage = progress.stage;
+                    lastDelivery = now;
+                    QMetaObject::invokeMethod(this, [this, jobId, progress] {
+                        if (sourceThread_ && jobId == sourceJobId_ && !sourceStop_.stop_requested())
+                            source_->setProgress(progress);
+                    }, Qt::QueuedConnection);
+                };
 
                 *result = code::collectAndParse(
                     request,
@@ -188,30 +460,54 @@ void MainWindow::loadDirectory(
         sourceThread_,
         &QThread::finished,
         this,
-        [this, structure, result]() {
+        [this, result]() {
             sourceThread_ = nullptr;
-            structure->setLoading(false);
+            structure_->setLoading(false);
+            source_->setLoading(false);
+            fileSelection_->setEnabled(true);
+            diagnostics_->setLoading(false);
             statusBar()->clearMessage();
 
-            if (auto* snapshot =
+            if (sourceStop_.stop_requested() || std::holds_alternative<Cancelled>(*result)) {
+                source_->showResult(QString::fromUtf8("Відкриття скасовано. Попередній результат збережено."));
+                statusBar()->showMessage(QString::fromUtf8("Відкриття скасовано"), 5000);
+            } else if (auto* snapshot =
                     std::get_if<code::ParsedSnapshot>(result.get())) {
-                structure->setSnapshot(
+                const bool partial = snapshot->coverage.completeness == Completeness::partial;
+                const bool warnings = !snapshot->coverage.diagnostics.empty() || snapshot->coverage.skippedElements > 0;
+                QString summary;
+                if (partial || warnings) {
+                    summary = (partial ? QString::fromUtf8("Частковий результат")
+                                       : QString::fromUtf8("Готово з повідомленнями"))
+                        + QString::fromUtf8(" · файлів: %1 · пропущено: %2 · повідомлень: %3.")
+                        .arg(static_cast<qulonglong>(snapshot->units.size()))
+                        .arg(static_cast<qulonglong>(snapshot->coverage.skippedElements))
+                        .arg(static_cast<qulonglong>(snapshot->coverage.diagnostics.size()));
+                    if (!snapshot->coverage.diagnostics.empty()) {
+                        const auto& diagnostic = snapshot->coverage.diagnostics.front();
+                        summary += "\n";
+                        if (diagnostic.path) summary += QString::fromStdString(*diagnostic.path) + ": ";
+                        summary += QString::fromStdString(diagnostic.message);
+                    }
+                } else if (snapshot->units.empty()) {
+                    summary = QString::fromUtf8("Готово · відповідних C++ файлів немає. Перевірте вибір файлів і стандартні фільтри.");
+                } else {
+                    summary = QString::fromUtf8("Готово · файлів: %1. Результат доступний у «Структурі».")
+                        .arg(static_cast<qulonglong>(snapshot->units.size()));
+                }
+                setSnapshot(
                     std::make_shared<const code::ParsedSnapshot>(
                         std::move(*snapshot)
                     )
                 );
+                source_->showResult(summary, true);
             } else if (const auto* error =
                            std::get_if<Error>(result.get())) {
-                QMessageBox::warning(
-                    this,
-                    QString::fromUtf8("Не вдалося відкрити джерело"),
-                    QString::fromStdString(error->message)
-                );
-            } else {
-                statusBar()->showMessage(
-                    QString::fromUtf8("Відкриття скасовано"),
-                    5000
-                );
+                QString message = QString::fromUtf8("Не вдалося відкрити джерело: %1")
+                    .arg(QString::fromStdString(error->message));
+                if (error->path) message += "\n" + QString::fromStdString(*error->path);
+                source_->showResult(message + QString::fromUtf8("\nПопередній результат збережено."));
+                statusBar()->showMessage(message, 10000);
             }
         }
     );
@@ -232,6 +528,50 @@ MainWindow::~MainWindow() {
     if (sourceThread_) {
         sourceThread_->wait();
     }
+}
+
+void MainWindow::setSnapshot(std::shared_ptr<const code::ParsedSnapshot> snapshot, bool demonstration) {
+    structure_->setSnapshot(snapshot, demonstration);
+    diagnostics_->setSnapshot(snapshot, demonstration);
+    analysisPages_->setContext(!snapshot ? QString::fromUtf8("Відкрийте джерело у розділі «Код → Джерело».")
+        : demonstration ? QString::fromUtf8("Демонстраційний знімок")
+                        : QString::fromUtf8("Поточний знімок відкритої папки"));
+
+    if (trendPage_) {
+        std::vector<std::string> functionKeys;
+        std::vector<std::string> filePaths;
+        if (snapshot) {
+            for (const auto& unit : snapshot->units) {
+                if (!unit.relativePath.empty()
+                    && std::find(filePaths.begin(), filePaths.end(), unit.relativePath) == filePaths.end()) {
+                    filePaths.push_back(unit.relativePath);
+                }
+                for (const auto& function : unit.functions) {
+                    if (function && !function->identityKey.empty()
+                        && std::find(functionKeys.begin(), functionKeys.end(), function->identityKey)
+                            == functionKeys.end()) {
+                        functionKeys.push_back(function->identityKey);
+                    }
+                }
+            }
+        }
+        trendPage_->setAvailableTargets(functionKeys, filePaths);
+    }
+
+    analysisController_->setInput(std::move(snapshot));
+}
+
+void MainWindow::cancelSource() {
+    if (!sourceThread_) {
+        return;
+    }
+
+    sourceStop_.request_stop();
+    source_->setCancelling();
+
+    statusBar()->showMessage(
+        QString::fromUtf8("Скасовуємо відкриття…")
+    );
 }
 
 } // namespace xray::app

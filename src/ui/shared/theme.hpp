@@ -4,6 +4,7 @@
 
 class QApplication;
 class QPalette;
+class QScrollBar;
 
 namespace xray::ui {
 
@@ -25,5 +26,6 @@ SyntaxColors syntaxColors(const QPalette& palette);
 Theme loadTheme();
 void saveTheme(Theme theme);
 void applyTheme(QApplication& application, Theme theme);
+void styleWorkspaceScrollBar(QScrollBar* scrollBar);
 
 } // namespace xray::ui

@@ -48,8 +48,17 @@ NavigationPanel::NavigationPanel(QWidget* parent) : QFrame(parent) {
     codeButton_->setAutoExclusive(true);
     codeButton_->setChecked(true);
 
-    addSection(Symbol::analysis, QString::fromUtf8("Аналіз"), false);
-    addSection(Symbol::history, QString::fromUtf8("Історія"), false);
+    analysisButton_ = addSection(Symbol::analysis, QString::fromUtf8("Аналіз"), true);
+    analysisButton_->setObjectName("analysisSection");
+    analysisButton_->setCheckable(true);
+    analysisButton_->setAutoExclusive(true);
+    connect(analysisButton_, &QToolButton::clicked, this, [this] { showSection(Section::analysis); });
+
+    historyButton_ = addSection(Symbol::history, QString::fromUtf8("Історія"), true);
+    historyButton_->setObjectName("historySection");
+    historyButton_->setCheckable(true);
+    historyButton_->setAutoExclusive(true);
+    connect(historyButton_, &QToolButton::clicked, this, [this] { showSection(Section::history); });
 
     compareButton_ = addSection(Symbol::compare, QString::fromUtf8("Порівняння"), true);
     compareButton_->setObjectName("compareSection");
@@ -136,11 +145,27 @@ void NavigationPanel::showSection(Section section) {
     if (section == Section::code) {
         sectionTitle_->setText(QString::fromUtf8("Код"));
         sectionSubtitle_->setText(QString::fromUtf8("Файли та структура"));
-        addPage(Symbol::source, QString::fromUtf8("Джерело"), false);
-        addPage(Symbol::filter, QString::fromUtf8("Відбір файлів"), false);
+        addPage(Symbol::source, QString::fromUtf8("Джерело"), true);
+        addPage(Symbol::filter, QString::fromUtf8("Відбір файлів"), true);
         addPage(Symbol::structure, QString::fromUtf8("Структура"), true);
-        addPage(Symbol::diagnostics, QString::fromUtf8("Діагностика"), false);
+        addPage(Symbol::diagnostics, QString::fromUtf8("Діагностика"), true);
         pagesList_->setCurrentRow(2);
+    } else if (section == Section::analysis) {
+        sectionTitle_->setText(QString::fromUtf8("Аналіз"));
+        sectionSubtitle_->setText(QString::fromUtf8("Метрики та правила"));
+        addPage(Symbol::document, QString::fromUtf8("Профілі"), true);
+        addPage(Symbol::analysis, QString::fromUtf8("Метрики"), true);
+        addPage(Symbol::filter, QString::fromUtf8("Правила"), true);
+        addPage(Symbol::diagnostics, QString::fromUtf8("Порушення"), true);
+        pagesList_->setCurrentRow(1);
+    } else if (section == Section::history) {
+        sectionTitle_->setText(QString::fromUtf8("Історія"));
+        sectionSubtitle_->setText(QString::fromUtf8("Ревізії та аналіз змін"));
+        addPage(Symbol::history, QString::fromUtf8("Журнал комітів"), true);
+        addPage(Symbol::filter, QString::fromUtf8("Фільтри історії"), true);
+        addPage(Symbol::analysis, QString::fromUtf8("Динаміка коду"), true);
+        addPage(Symbol::structure, QString::fromUtf8("Дерево ревізій"), true);
+        pagesList_->setCurrentRow(0);
     } else if (section == Section::review) {
         sectionTitle_->setText(QString::fromUtf8("Порівняння"));
         sectionSubtitle_->setText(QString::fromUtf8("Зміни, тренди та експорт"));
@@ -173,7 +198,11 @@ void NavigationPanel::setTheme(Theme theme) {
 void NavigationPanel::setCurrentPage(Section section, int pageIndex) {
     if (currentSection_ != section) {
         showSection(section);
-        if (section == Section::review && compareButton_) {
+        if (section == Section::analysis && analysisButton_) {
+            analysisButton_->setChecked(true);
+        } else if (section == Section::history && historyButton_) {
+            historyButton_->setChecked(true);
+        } else if (section == Section::review && compareButton_) {
             compareButton_->setChecked(true);
         } else if (section == Section::code && codeButton_) {
             codeButton_->setChecked(true);

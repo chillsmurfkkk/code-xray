@@ -1,5 +1,6 @@
 #include "structure_page.hpp"
 #include "ui/shared/icons.hpp"
+#include "ui/shared/theme.hpp"
 #include "code_view.hpp"
 
 #include <QApplication>
@@ -13,6 +14,7 @@
 #include <QSplitter>
 #include <QSplitterHandle>
 #include <QStackedWidget>
+#include <QScrollBar>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QSignalBlocker>
@@ -288,6 +290,8 @@ StructurePage::StructurePage(QWidget* parent) : QWidget(parent) {
     tree_ = new QTreeWidget(treeContent);
     tree_->setItemDelegate(new EntityDelegate(tree_));
     tree_->setObjectName("structureTree");
+    tree_->verticalScrollBar()->setObjectName("structureScrollBar");
+    styleWorkspaceScrollBar(tree_->verticalScrollBar());
     tree_->setHeaderHidden(true);
     tree_->setColumnCount(1);
     tree_->setUniformRowHeights(true);
@@ -544,6 +548,31 @@ void StructurePage::setSnapshot(
     treeContent_->setCurrentWidget(entityCount == 0 ? emptyResult_ : tree_);
 
     applyFilters();
+}
+
+bool StructurePage::openLocation(const QString& path, int line) {
+    if (!snapshot_) return false;
+    for (int i = 0; i < tree_->topLevelItemCount(); ++i) {
+        auto* item = tree_->topLevelItem(i);
+        bool valid = false;
+        const auto index = item->data(0, UnitIndexRole).toULongLong(&valid);
+        if (!valid || index >= snapshot_->units.size()) continue;
+        const auto& unit = snapshot_->units[static_cast<std::size_t>(index)];
+        if (QString::fromStdString(unit.relativePath) != path || !unit.root || !unit.root->sourceBytes) continue;
+        searchInput_->clear();
+        kindFilter_->setCurrentIndex(0);
+        tree_->setCurrentItem(item);
+        onEntitySelected(item);
+        const auto& starts = codeView_->sourceLineStarts();
+        if (line > 0 && static_cast<std::size_t>(line) <= starts.size()) {
+            QTextCursor cursor(codeView_->document());
+            cursor.setPosition(starts[static_cast<std::size_t>(line - 1)]);
+            codeView_->setTextCursor(cursor);
+            codeView_->ensureCursorVisible();
+        }
+        return true;
+    }
+    return false;
 }
 
 void StructurePage::onEntitySelected(QTreeWidgetItem* item) {

@@ -55,9 +55,26 @@ if(CODE_XRAY_BUILD_PROFILES)
     target_link_libraries(xray_analysis PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
-add_library(xray_history INTERFACE)
-target_link_libraries(xray_history INTERFACE xray_code)
+if(NOT DEFINED CODE_XRAY_BUILD_HISTORY)
+    if(CODE_XRAY_BUILD_APP OR CODE_XRAY_BUILD_PROFILES)
+        set(_DEFAULT_BUILD_HISTORY ON)
+    else()
+        set(_DEFAULT_BUILD_HISTORY OFF)
+    endif()
+else()
+    set(_DEFAULT_BUILD_HISTORY ${CODE_XRAY_BUILD_HISTORY})
+endif()
+option(CODE_XRAY_BUILD_HISTORY "Build libgit2-backed history module" ${_DEFAULT_BUILD_HISTORY})
 
+if(CODE_XRAY_BUILD_HISTORY)
+    find_package(libgit2 CONFIG REQUIRED)
+    add_library(xray_history STATIC src/history/api.cpp)
+    target_link_libraries(xray_history PUBLIC xray_code PRIVATE libgit2::libgit2package)
+    target_compile_definitions(xray_history PUBLIC CODE_XRAY_HAS_HISTORY=1)
+else()
+    add_library(xray_history INTERFACE)
+    target_link_libraries(xray_history INTERFACE xray_code)
+endif()
 add_library(xray_review STATIC
     src/review/compare.cpp
     src/review/trend.cpp
@@ -99,6 +116,13 @@ if(BUILD_TESTING)
     add_executable(history_test tests/history_test.cpp)
     target_link_libraries(history_test PRIVATE xray_history)
     add_test(NAME history_test COMMAND history_test)
+
+    if(CODE_XRAY_BUILD_HISTORY)
+        add_executable(git_backend_tests tests/history/git_backend_tests.cpp)
+        target_link_libraries(git_backend_tests PRIVATE xray_history libgit2::libgit2package)
+        add_test(NAME git_backend COMMAND git_backend_tests)
+        set_tests_properties(git_backend PROPERTIES TIMEOUT 30)
+    endif()
 
     add_executable(contract_tests tests/contracts.cpp)
     target_link_libraries(contract_tests PRIVATE xray_history xray_review)
@@ -152,8 +176,20 @@ if(CODE_XRAY_BUILD_APP)
         unofficial::tree-sitter::tree-sitter
     )
 
+    if(NOT CODE_XRAY_BUILD_PROFILES)
+        message(FATAL_ERROR "Analysis pages require CODE_XRAY_BUILD_PROFILES=ON")
+    endif()
+
     # Shared GUI components can be reused by the app and its behavior checks.
     add_library(xray_ui STATIC
+        src/app/analysis_controller.cpp src/app/analysis_controller.hpp
+        src/app/coordinator.cpp src/app/coordinator.hpp
+        src/ui/analysis/session.cpp src/ui/analysis/session.hpp
+        src/ui/analysis/profiles_page.cpp src/ui/analysis/profiles_page.hpp
+        src/ui/analysis/metrics_page.cpp src/ui/analysis/metrics_page.hpp
+        src/ui/analysis/rules_page.cpp src/ui/analysis/rules_page.hpp
+        src/ui/analysis/findings_page.cpp src/ui/analysis/findings_page.hpp
+        src/ui/analysis/workspace.cpp src/ui/analysis/workspace.hpp
         src/ui/shared/theme.cpp
         src/ui/shared/theme.hpp
         src/ui/shared/popup_style.hpp
@@ -163,6 +199,12 @@ if(CODE_XRAY_BUILD_APP)
         src/ui/shared/navigation.hpp
         src/ui/code/structure_page.cpp
         src/ui/code/structure_page.hpp
+        src/ui/code/source_page.cpp
+        src/ui/code/source_page.hpp
+        src/ui/code/file_selection_page.cpp
+        src/ui/code/file_selection_page.hpp
+        src/ui/code/diagnostics_page.cpp
+        src/ui/code/diagnostics_page.hpp
         src/ui/code/demo_snapshot.cpp
         src/ui/code/demo_snapshot.hpp
         src/ui/code/code_view.cpp
@@ -178,9 +220,18 @@ if(CODE_XRAY_BUILD_APP)
         src/ui/review/ExportPage.cpp
         src/ui/review/ExportPage.hpp
         src/ui/review/review_table_delegate.hpp
+        src/ui/history/CommitsPage.cpp
+        src/ui/history/CommitsPage.hpp
+        src/ui/history/HistoryFiltersPage.cpp
+        src/ui/history/HistoryFiltersPage.hpp
+        src/ui/history/CodeChurnPage.cpp
+        src/ui/history/CodeChurnPage.hpp
+        src/ui/history/AncestryPage.cpp
+        src/ui/history/AncestryPage.hpp
+        src/ui/history/history_fixtures.hpp
     )
     set_target_properties(xray_ui PROPERTIES AUTOMOC ON)
-    target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common xray_review)
+    target_link_libraries(xray_ui PUBLIC Qt6::Widgets xray_common xray_history xray_review)
 
     qt_add_executable(code-xray WIN32 src/app/main.cpp src/app/main_window.cpp src/app/main_window.hpp src/app/windows_uia_filter.hpp)
     target_link_libraries(code-xray PRIVATE xray_ui xray_history xray_review)
@@ -192,17 +243,52 @@ if(CODE_XRAY_BUILD_APP)
     endif()
 
     if(BUILD_TESTING)
+        find_package(Qt6 CONFIG REQUIRED COMPONENTS Test)
+        add_executable(analysis_ui_tests tests/analysis/ui_tests.cpp src/app/main_window.cpp)
+        set_target_properties(analysis_ui_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(analysis_ui_tests PRIVATE xray_ui xray_code Qt6::Test)
+        add_test(NAME analysis_ui COMMAND analysis_ui_tests)
+        set_tests_properties(analysis_ui PROPERTIES TIMEOUT 30)
+        if(NOT WIN32)
+            set_tests_properties(analysis_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        endif()
+
+        add_executable(history_ui_tests tests/history/ui_tests.cpp src/app/main_window.cpp)
+        set_target_properties(history_ui_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(history_ui_tests PRIVATE xray_ui xray_history xray_code Qt6::Test)
+        add_test(NAME history_ui COMMAND history_ui_tests)
+        set_tests_properties(history_ui PROPERTIES TIMEOUT 30)
+
+        add_executable(coordinator_tests tests/app/coordinator_tests.cpp)
+        set_target_properties(coordinator_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(coordinator_tests PRIVATE xray_ui xray_history xray_code xray_analysis xray_review libgit2::libgit2package Qt6::Test)
+        add_test(NAME coordinator COMMAND coordinator_tests)
+        set_tests_properties(coordinator PROPERTIES TIMEOUT 60)
+
         add_executable(gui_design_tests tests/ui/design_tests.cpp src/app/main_window.cpp)
         target_link_libraries(gui_design_tests PRIVATE xray_ui xray_code)
         add_dependencies(gui_design_tests code-xray)
         add_test(NAME gui_design COMMAND gui_design_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-design")
         set_tests_properties(gui_design PROPERTIES TIMEOUT 30)
 
+        add_executable(gui_source_tests tests/ui/source_tests.cpp src/app/main_window.cpp)
+        target_link_libraries(gui_source_tests PRIVATE xray_ui xray_code Qt6::Test)
+        add_test(NAME gui_source COMMAND gui_source_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-source")
+        set_tests_properties(gui_source PROPERTIES TIMEOUT 120)
+
         add_executable(gui_snapshot_tests tests/ui/snapshot_tests.cpp)
         target_link_libraries(gui_snapshot_tests PRIVATE xray_ui xray_code)
         add_dependencies(gui_snapshot_tests code-xray)
         add_test(NAME gui_snapshot COMMAND gui_snapshot_tests "${CMAKE_CURRENT_BINARY_DIR}/gui-snapshots")
         set_tests_properties(gui_snapshot PROPERTIES TIMEOUT 30)
+
+        if(CODE_XRAY_BUILD_HISTORY)
+            add_executable(gui_git_snapshot_tests tests/ui/git_snapshot_tests.cpp)
+            target_link_libraries(gui_git_snapshot_tests PRIVATE xray_ui xray_code xray_history libgit2::libgit2package)
+            add_dependencies(gui_git_snapshot_tests code-xray)
+            add_test(NAME gui_git_snapshot COMMAND gui_git_snapshot_tests)
+            set_tests_properties(gui_git_snapshot PROPERTIES TIMEOUT 30)
+        endif()
 
         add_executable(gui_syntax_tests tests/ui/syntax_tests.cpp)
         target_link_libraries(gui_syntax_tests PRIVATE xray_ui)

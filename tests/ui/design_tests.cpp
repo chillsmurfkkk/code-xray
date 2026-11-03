@@ -72,7 +72,9 @@ int main(int argc, char* argv[]) {
         require(pages && collapse && theme && panel && editor && splitter, "GUI components must exist");
         require(pages->currentRow() == 2, "Structure must be the selected page");
         require(editor->isReadOnly(), "Source code must remain read-only");
-        require(!(pages->item(0)->flags() & Qt::ItemIsEnabled), "Unimplemented pages must be disabled");
+        require(pages->item(0)->flags() & Qt::ItemIsEnabled, "Source page must be available");
+        require(pages->item(1)->flags() & Qt::ItemIsEnabled, "File filters must be available");
+        require(pages->item(3)->flags() & Qt::ItemIsEnabled, "Diagnostics must be available");
         checkWrappedLabels(window);
         if (!output.isEmpty()) require(window.grab().save(output + "/dark.png"), "Dark snapshot failed");
 

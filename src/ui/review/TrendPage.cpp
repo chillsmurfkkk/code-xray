@@ -5,12 +5,23 @@
 
 #include <QPainter>
 #include <QPen>
+#include <QSignalBlocker>
 #include <cmath>
 #include <algorithm>
 
 namespace xray::ui::review {
 
 using namespace xray::review;
+
+namespace {
+void appendUniqueTarget(std::vector<std::string>& targets, const std::string& value)
+{
+    if (value.empty()) return;
+    if (std::find(targets.begin(), targets.end(), value) == targets.end()) {
+        targets.push_back(value);
+    }
+}
+} // namespace
 
 // ─── TrendChartWidget ────────────────────────────────────────
 
@@ -195,13 +206,13 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
     titleLabel->setFont(titleFont);
     headerLayout->addWidget(titleLabel);
 
-    auto* demoBadge = new QLabel(QString::fromUtf8("Демо-режим"));
-    demoBadge->setStyleSheet(
+    demoBadge_ = new QLabel(QString::fromUtf8("Демо-режим"));
+    demoBadge_->setStyleSheet(
         "background: #d65d0e; color: #ebdbb2; font-weight: bold; "
         "border-radius: 8px; padding: 3px 8px; font-size: 11px;"
     );
-    demoBadge->setToolTip(QString::fromUtf8("Відображається динаміка на основі демонстраційних фікстурних комітів."));
-    headerLayout->addWidget(demoBadge);
+    demoBadge_->setToolTip(QString::fromUtf8("Відображається динаміка на основі демонстраційних фікстурних комітів."));
+    headerLayout->addWidget(demoBadge_);
     headerLayout->addStretch();
     mainLayout->addLayout(headerLayout);
 
@@ -225,6 +236,16 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
     targetCombo_->addItem(QString::fromUtf8("Файл (максимум)"), static_cast<int>(TrendAggregation::file_max));
     controlLayout->addWidget(new QLabel(QString::fromUtf8("Ціль:")));
     controlLayout->addWidget(targetCombo_);
+
+    entityLabel_ = new QLabel(QString::fromUtf8("Сутність:"));
+    entityCombo_ = new QComboBox;
+    entityCombo_->setMinimumHeight(32);
+    entityCombo_->setProperty("role", "inputField");
+    entityCombo_->setMinimumWidth(220);
+    entityCombo_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    entityCombo_->setToolTip(QString::fromUtf8("Функція або файл, для якого будується тренд."));
+    controlLayout->addWidget(entityLabel_);
+    controlLayout->addWidget(entityCombo_, /*stretch=*/1);
 
     buildButton_ = new QPushButton(QString::fromUtf8("Побудувати"));
     buildButton_->setMinimumHeight(32);
@@ -262,83 +283,143 @@ TrendPage::TrendPage(QWidget* parent) : QWidget(parent)
     connect(buildButton_, &QPushButton::clicked, this, &TrendPage::onTrendRequested);
 
     // Демо-дані
-    setTrendReport(makeDemoTrendReport());
+    functionKeys_ = {"add(int,int)", "multiply(int,int)", "oldFunction()", "newHelper()"};
+    filePaths_ = {"src/math.cpp", "src/render.cpp"};
+    setTrendReport(makeDemoTrendReport(), /*isDemo=*/true);
     statusLabel_->setText(QString::fromUtf8("[Демо] Динаміку побудовано на основі 5 тестових комітів."));
 }
 
 // D-H04
 void TrendPage::onTrendMetricChanged()
 {
-    statusLabel_->setText(QString::fromUtf8("[Демо] Метрику змінено — натисніть «Побудувати»."));
+    statusLabel_->setText(statusPrefix()
+        + QString::fromUtf8("Метрику змінено — натисніть «Побудувати»."));
 }
 
 // D-H05
 void TrendPage::onTrendTargetChanged()
 {
-    statusLabel_->setText(QString::fromUtf8("[Демо] Ціль змінено — натисніть «Побудувати»."));
+    refreshEntityChoices();
+    statusLabel_->setText(statusPrefix()
+        + QString::fromUtf8("Ціль змінено — натисніть «Побудувати»."));
 }
 
 // D-H06
 void TrendPage::onTrendRequested()
 {
-    TrendReport report;
-    auto metricId = static_cast<analysis::MetricId>(metricCombo_->currentData().toInt());
-    auto targetAgg = static_cast<TrendAggregation>(targetCombo_->currentData().toInt());
+    const auto metricId = static_cast<analysis::MetricId>(metricCombo_->currentData().toInt());
+    const auto targetAgg = static_cast<TrendAggregation>(targetCombo_->currentData().toInt());
+    const QString entityKey = entityCombo_->currentData().toString();
 
-    report.options.metricId = metricId;
-    report.options.aggregation = targetAgg;
-    report.options.entityKey = (targetAgg == TrendAggregation::function) 
-        ? "multiply(int,int)" : "src/math.cpp";
-
-    if (metricId == analysis::MetricId::function_lines) {
-        if (targetAgg == TrendAggregation::function) {
-            report.points = {
-                {"commit-aaa", 12.0, 1, 0, ""},
-                {"commit-bbb", 9.0, 1, 0, ""},
-                {"commit-ccc", std::nullopt, 0, 1, "Function not found"},
-                {"commit-ddd", 6.0, 1, 0, ""},
-                {"commit-eee", 4.0, 1, 0, ""},
-            };
-        } else {
-            report.points = {
-                {"commit-aaa", 35.0, 3, 0, "file mean"},
-                {"commit-bbb", 32.0, 3, 0, "file mean"},
-                {"commit-ccc", 28.0, 2, 1, "1 function skipped"},
-                {"commit-ddd", 24.0, 3, 0, "file mean"},
-                {"commit-eee", 20.0, 3, 0, "file mean"},
-            };
-        }
-    } else if (metricId == analysis::MetricId::max_nesting) {
-        report.points = {
-            {"commit-aaa", 3.0, 1, 0, ""},
-            {"commit-bbb", 2.0, 1, 0, ""},
-            {"commit-ccc", std::nullopt, 0, 1, "Function not found"},
-            {"commit-ddd", 1.0, 1, 0, ""},
-            {"commit-eee", 0.0, 1, 0, ""},
-        };
-    } else { // branch_count
-        report.points = {
-            {"commit-aaa", 5.0, 1, 0, ""},
-            {"commit-bbb", 4.0, 1, 0, ""},
-            {"commit-ccc", std::nullopt, 0, 1, "Function not found"},
-            {"commit-ddd", 2.0, 1, 0, ""},
-            {"commit-eee", 1.0, 1, 0, ""},
-        };
+    if (tipOid_.isEmpty()) {
+        statusLabel_->setText(QString::fromUtf8(
+            "Спочатку відкрийте Git-репозиторій у розділі «Історія»."));
+        return;
+    }
+    if (entityKey.isEmpty()) {
+        statusLabel_->setText(QString::fromUtf8(
+            "Оберіть функцію або файл для побудови тренду."));
+        return;
     }
 
-    setTrendReport(report);
-    statusLabel_->setText(QString::fromUtf8("Тренд успішно оновлено!"));
+    statusLabel_->setText(QString::fromUtf8("Будуємо тренд…"));
+    emit trendRebuildRequested(tipOid_, metricId, targetAgg, entityKey);
 }
 
-void TrendPage::setTrendReport(const TrendReport& report)
+void TrendPage::setTrendReport(const TrendReport& report, bool isDemo)
 {
     currentTrend_ = report;
+    isDemo_ = isDemo;
+    if (demoBadge_) demoBadge_->setVisible(isDemo);
+
     chart_->setPoints(report.points);
     populateTable(report.points);
+    updateTargetsFromReport(report);
+
+    if (!report.inputs.chainTipOid.empty()) {
+        tipOid_ = QString::fromStdString(report.inputs.chainTipOid);
+    }
+
+    {
+        QSignalBlocker metricBlocker(metricCombo_);
+        QSignalBlocker targetBlocker(targetCombo_);
+        const int metricIndex = metricCombo_->findData(static_cast<int>(report.options.metricId));
+        if (metricIndex >= 0) metricCombo_->setCurrentIndex(metricIndex);
+        const int targetIndex = targetCombo_->findData(static_cast<int>(report.options.aggregation));
+        if (targetIndex >= 0) targetCombo_->setCurrentIndex(targetIndex);
+    }
+    refreshEntityChoices(QString::fromStdString(report.options.entityKey));
+
+    QString target = QString::fromStdString(report.options.entityKey);
+    if (target.isEmpty()) target = QString::fromUtf8("—");
     statusLabel_->setText(
-        QString::fromUtf8("[Демо] Точок: %1, ціль: %2")
+        statusPrefix()
+        + QString::fromUtf8("Точок: %1, ціль: %2")
             .arg(static_cast<qlonglong>(report.points.size()))
-            .arg(QString::fromStdString(report.options.entityKey)));
+            .arg(target));
+}
+
+void TrendPage::setRepositoryTip(const QString& tipOid)
+{
+    tipOid_ = tipOid;
+}
+
+void TrendPage::setAvailableTargets(const std::vector<std::string>& functionKeys,
+                                    const std::vector<std::string>& filePaths)
+{
+    functionKeys_ = functionKeys;
+    filePaths_ = filePaths;
+    refreshEntityChoices();
+}
+
+void TrendPage::refreshEntityChoices(const QString& preferred)
+{
+    if (!entityCombo_) return;
+
+    const auto aggregation = static_cast<TrendAggregation>(targetCombo_->currentData().toInt());
+    const auto& targets = (aggregation == TrendAggregation::function)
+        ? functionKeys_ : filePaths_;
+
+    QString preferredKey = preferred;
+    if (preferredKey.isEmpty()) preferredKey = entityCombo_->currentData().toString();
+
+    const QSignalBlocker blocker(entityCombo_);
+    entityCombo_->clear();
+    if (targets.empty()) {
+        entityCombo_->addItem(QString::fromUtf8("— немає доступних цілей —"), QString());
+        entityCombo_->setCurrentIndex(0);
+        return;
+    }
+
+    for (const auto& target : targets) {
+        entityCombo_->addItem(QString::fromStdString(target),
+                              QString::fromStdString(target));
+    }
+    int index = preferredKey.isEmpty() ? -1 : entityCombo_->findData(preferredKey);
+    if (index < 0) index = 0;
+    entityCombo_->setCurrentIndex(index);
+}
+
+void TrendPage::updateTargetsFromReport(const TrendReport& report)
+{
+    std::vector<std::string> functions;
+    std::vector<std::string> files;
+    for (const auto& snapshot : report.inputs.snapshots) {
+        if (!snapshot || !snapshot->parsed) continue;
+        for (const auto& unit : snapshot->parsed->units) {
+            appendUniqueTarget(files, unit.relativePath);
+            for (const auto& function : unit.functions) {
+                if (function) appendUniqueTarget(functions, function->identityKey);
+            }
+        }
+    }
+    if (!functions.empty()) functionKeys_ = std::move(functions);
+    if (!files.empty()) filePaths_ = std::move(files);
+}
+
+QString TrendPage::statusPrefix() const
+{
+    return isDemo_ ? QString::fromUtf8("[Демо] ") : QString();
 }
 
 void TrendPage::populateTable(const std::vector<TrendPoint>& points)

@@ -121,3 +121,32 @@ B04–B06 показані для звірки з початковим план�
 Власні реалізації надходять із чотирьох авторських комітів Kolya0685: `5fb5a31c906bede7f777bbd2cbe718a348d4611f` (довжина та перше правило), `6130f62248aa2b6b830c44b6fa45ac4b985789be` (дві метрики), `327d2921276f6d6365cddb084587d45e09255a69` (правила й JSON-профілі), `0387bbd78deba94609b2fb98a78c4673adee98bd` (engine та агрегати). E0 типи в `src/analysis/types.hpp` походять від `c8ed63c17be2dbaaa0dc2ccdeccc6c6106e1573f` автора A; вони не включені в рахунок B.
 
 Тестові сценарії та команди для `analysis`, `analysis_engine`, `profiles` наведені в [analysis-engine.md](../analysis-engine.md). Демо фактично повернуло 3 метрики, 1 finding, середнє й максимум 61 при порозі 60; його журнал і результат спільного запуску тестів наведені в [lab1-verification.md](../lab1/lab1-verification.md).
+
+## ЛР №2 — інтеграція форм B
+
+Від `b6a7ade`: **4 форми, 22 власні контроли, 4 контейнери, 12 обробників**.
+Переглядач CodeView A, спільна навігація, індикатор прогресу та скасування
+окремо до кількості контролів форм не включені.
+
+| Форма в `src/ui/analysis/` | Контроли (objectName) | Кількість |
+|---|---|---:|
+| ProfilesPage | `profilesList`; `createProfile`, `duplicateProfile`, `importProfile`, `saveProfile` | 5 |
+| MetricsPage | `metricsTable`; `metricSort`, `metricDirection`, `aggregation`; `metricPath`; `showUnknown` | 6 |
+| RulesPage | `rulesTable`; `threshold0..2`; `applyRules` | 5 |
+| FindingsPage | `findingsTable`; `findingRule`; `findingSearch`, `findingPath`; `navigateFinding`, `reanalyze` | 6 |
+
+Контейнери — список профілів і три таблиці. Вкладені прапорці не рахуються окремо.
+
+| Обробники | Події |
+|---|---|
+| ProfilesPage::onProfileCreated / onProfileDuplicated / onProfileImported / onProfileSaved | Чотири кнопки профілів. |
+| Session::selectProfile | Вибір профілю. |
+| MetricsPage::refresh / updateAggregate | Сортування, фільтри й агрегація. |
+| RulesPage::readDraft / onRulesApplied | Пороги, перемикачі та застосування. |
+| FindingsPage::refresh / onFindingActivated | Фільтри та код порушення. |
+| Session::requestAnalysis | Повторний аналіз. |
+
+Перевірка 2026-10-28: 20/20 цілей CTest та нативний smoke-test на macOS із
+Qt 6.11.2. У тестах реальні C++ файли передаються до спільного головного вікна;
+перевірено обидві теми, навігацію A/B/D, скасування та заміну джерела під час
+аналізу. [Команди й межі перевірки](../analysis-ui.md).
