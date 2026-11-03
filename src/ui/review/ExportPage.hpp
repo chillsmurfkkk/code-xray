@@ -22,7 +22,11 @@ public:
     explicit ExportPage(QWidget* parent = nullptr);
 
     /// Встановити поточний звіт для експорту.
-    void setReport(const xray::review::ComparisonReport& report);
+    void setReport(const xray::review::ComparisonReport& report, bool isDemo = false);
+
+    bool isDemo() const { return isDemo_; }
+    bool hasReport() const { return hasReport_; }
+    const xray::review::ComparisonReport& currentReport() const { return currentReport_; }
 
 private slots:
     void onExportFormatChanged();    // D-H10
@@ -37,9 +41,11 @@ private:
     QPushButton* exportButton_     = nullptr;  // Кнопка збереження
     QTextEdit*   previewArea_      = nullptr;
     QLabel*      statusLabel_      = nullptr;
+    QLabel*      demoBadge_        = nullptr;
 
     xray::review::ComparisonReport currentReport_;
     bool hasReport_ = false;
+    bool isDemo_ = true;
 };
 
 } // namespace xray::ui::review

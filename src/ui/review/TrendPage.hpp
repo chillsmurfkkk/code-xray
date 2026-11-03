@@ -50,6 +50,9 @@ public:
     void setAvailableTargets(const std::vector<std::string>& functionKeys,
                              const std::vector<std::string>& filePaths);
 
+    void setStatusText(const QString& text);
+    QString statusText() const;
+
 signals:
     /// Емітується, коли користувач натискає «Побудувати» за наявності реального звіту.
     /// MainWindow з'єднує цей сигнал з Coordinator::buildTrend().
