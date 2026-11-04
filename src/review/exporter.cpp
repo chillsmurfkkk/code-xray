@@ -272,17 +272,17 @@ ReportModel buildReportModel(const ComparisonReport& report, const JobContext* c
 }
 
 // ─────────────────────────────────────────────────────────────
-// D22  HtmlExporter::write (Шаблонізація через inja з autoescape/escapeHtmlText)
+// D22  renderHtmlReport / HtmlExporter::write
 // ─────────────────────────────────────────────────────────────
-bool HtmlExporter::write(const ComparisonReport& report, const ExportOptions& options, const JobContext& ctx)
+std::string renderHtmlReport(const ComparisonReport& report, const JobContext* ctx)
 {
-    if (ctx.isCancelled()) return false;
-    ctx.report("Building report model", 10, 100);
+    if (ctx && ctx->isCancelled()) return {};
+    if (ctx) ctx->report("Building report model", 10, 100);
 
-    ReportModel model = buildReportModel(report, &ctx);
-    if (ctx.isCancelled()) return false;
+    ReportModel model = buildReportModel(report, ctx);
+    if (ctx && ctx->isCancelled()) return {};
 
-    ctx.report("Serializing data for HTML template", 30, 100);
+    if (ctx) ctx->report("Serializing data for HTML template", 30, 100);
 
     nlohmann::json data;
     data["baseId"] = escapeHtmlText(model.baseId);
@@ -299,8 +299,8 @@ bool HtmlExporter::write(const ComparisonReport& report, const ExportOptions& op
 
     nlohmann::json rows = nlohmann::json::array();
     for (std::size_t i = 0; i < model.rows.size(); ++i) {
-        if ((i % 50 == 0) && ctx.isCancelled()) {
-            return false;
+        if ((i % 50 == 0) && ctx && ctx->isCancelled()) {
+            return {};
         }
         const auto& row = model.rows[i];
         nlohmann::json r;
@@ -315,8 +315,8 @@ bool HtmlExporter::write(const ComparisonReport& report, const ExportOptions& op
     }
     data["rows"] = rows;
 
-    if (ctx.isCancelled()) return false;
-    ctx.report("Rendering HTML template with inja", 60, 100);
+    if (ctx && ctx->isCancelled()) return {};
+    if (ctx) ctx->report("Rendering HTML template with inja", 60, 100);
 
     const std::string tmpl = R"(<!DOCTYPE html>
 <html lang="en">
@@ -385,22 +385,27 @@ bool HtmlExporter::write(const ComparisonReport& report, const ExportOptions& op
     try {
         htmlContent = inja::render(tmpl, data);
     } catch (const std::exception&) {
-        return false;
+        return {};
     }
+    return htmlContent;
+}
 
-    if (ctx.isCancelled()) return false;
+bool HtmlExporter::write(const ComparisonReport& report, const ExportOptions& options, const JobContext& ctx)
+{
+    std::string htmlContent = renderHtmlReport(report, &ctx);
+    if (htmlContent.empty() && ctx.isCancelled()) return false;
+
     ctx.report("Writing HTML report to destination", 85, 100);
-
     return writeReportSafely(options.destination, htmlContent, options.overwriteConfirmed, nullptr, &ctx);
 }
 
 // ─────────────────────────────────────────────────────────────
-// D23  JsonExporter::write (Серіалізація через nlohmann/json)
+// D23  renderJsonReport / JsonExporter::write
 // ─────────────────────────────────────────────────────────────
-bool JsonExporter::write(const ComparisonReport& report, const ExportOptions& options, const JobContext& ctx)
+std::string renderJsonReport(const ComparisonReport& report, const JobContext* ctx)
 {
-    if (ctx.isCancelled()) return false;
-    ctx.report("Serializing report to JSON", 10, 100);
+    if (ctx && ctx->isCancelled()) return {};
+    if (ctx) ctx->report("Serializing report to JSON", 10, 100);
 
     nlohmann::json root;
     root["schemaVersion"] = "comparison-v1";
@@ -428,8 +433,8 @@ bool JsonExporter::write(const ComparisonReport& report, const ExportOptions& op
 
     root["summary"] = summarizeComparison(report.items);
 
-    if (ctx.isCancelled()) return false;
-    ctx.report("Serializing comparison items to JSON", 40, 100);
+    if (ctx && ctx->isCancelled()) return {};
+    if (ctx) ctx->report("Serializing comparison items to JSON", 40, 100);
 
     auto kindToString = [](ReviewKind k) {
         switch (k) {
@@ -453,8 +458,8 @@ bool JsonExporter::write(const ComparisonReport& report, const ExportOptions& op
 
     nlohmann::json items = nlohmann::json::array();
     for (std::size_t itemIdx = 0; itemIdx < report.items.size(); ++itemIdx) {
-        if ((itemIdx % 50 == 0) && ctx.isCancelled()) {
-            return false;
+        if ((itemIdx % 50 == 0) && ctx && ctx->isCancelled()) {
+            return {};
         }
         const auto& item = report.items[itemIdx];
         nlohmann::json it;
@@ -512,15 +517,27 @@ bool JsonExporter::write(const ComparisonReport& report, const ExportOptions& op
     }
     root["items"] = items;
 
-    if (ctx.isCancelled()) return false;
-    ctx.report("Dumping formatted JSON string", 75, 100);
+    if (ctx && ctx->isCancelled()) return {};
+    if (ctx) ctx->report("Dumping formatted JSON string", 75, 100);
 
-    std::string jsonStr = root.dump(2);
+    return root.dump(2);
+}
 
-    if (ctx.isCancelled()) return false;
+bool JsonExporter::write(const ComparisonReport& report, const ExportOptions& options, const JobContext& ctx)
+{
+    std::string jsonStr = renderJsonReport(report, &ctx);
+    if (jsonStr.empty() && ctx.isCancelled()) return false;
+
     ctx.report("Writing JSON report to destination", 90, 100);
-
     return writeReportSafely(options.destination, jsonStr, options.overwriteConfirmed, nullptr, &ctx);
+}
+
+std::string renderReport(const ComparisonReport& report, ExportFormat format, const JobContext* ctx)
+{
+    if (format == ExportFormat::html) {
+        return renderHtmlReport(report, ctx);
+    }
+    return renderJsonReport(report, ctx);
 }
 
 // ─────────────────────────────────────────────────────────────

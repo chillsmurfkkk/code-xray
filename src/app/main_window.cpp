@@ -272,7 +272,21 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     });
 
     connect(coordinator_, &Coordinator::comparisonCompleted, this, [this, navigation](const review::ComparisonReport& rep) {
-        comparisonPage_->setReport(rep, /*isDemo=*/false, QString::fromStdString(rep.baseId), QString::fromStdString(rep.targetId));
+        QString baseOid;
+        if (rep.base && rep.base->parsed && rep.base->parsed->source && rep.base->parsed->source->commitOid) {
+            baseOid = QString::fromStdString(*rep.base->parsed->source->commitOid);
+        } else {
+            baseOid = QString::fromStdString(rep.baseId);
+        }
+
+        QString targetOid;
+        if (rep.target && rep.target->parsed && rep.target->parsed->source && rep.target->parsed->source->commitOid) {
+            targetOid = QString::fromStdString(*rep.target->parsed->source->commitOid);
+        } else {
+            targetOid = QString::fromStdString(rep.targetId);
+        }
+
+        comparisonPage_->setReport(rep, /*isDemo=*/false, baseOid, targetOid);
         exportPage_->setReport(rep, /*isDemo=*/false);
 
         // Оновлюємо доступні цілі для сторінки динаміки (TrendPage)
@@ -282,7 +296,9 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
             for (const auto& unit : rep.target->parsed->units) {
                 fileKeys.push_back(unit.relativePath);
                 for (const auto& fn : unit.functions) {
-                    funcKeys.push_back(fn->describe());
+                    if (fn) {
+                        funcKeys.push_back(fn->identityKey.empty() ? fn->describe() : fn->identityKey);
+                    }
                 }
             }
         }
@@ -305,8 +321,8 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         if (!funcKeys.empty() || !fileKeys.empty()) {
             trendPage_->setAvailableTargets(funcKeys, fileKeys);
         }
-        if (!rep.targetId.empty()) {
-            trendPage_->setRepositoryTip(QString::fromStdString(rep.targetId));
+        if (!targetOid.isEmpty()) {
+            trendPage_->setRepositoryTip(targetOid);
         }
 
         navigation->setCurrentPage(ui::Section::review, 0);

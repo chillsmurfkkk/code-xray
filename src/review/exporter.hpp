@@ -42,6 +42,17 @@ struct ReportModel {
 
 ReportModel buildReportModel(const ComparisonReport& report, const JobContext* ctx = nullptr);
 
+// Serializes report to HTML string
+std::string renderHtmlReport(const ComparisonReport& report, const JobContext* ctx = nullptr);
+
+// Serializes report to JSON string
+std::string renderJsonReport(const ComparisonReport& report, const JobContext* ctx = nullptr);
+
+// Serializes report to string (HTML or JSON) using common formatting logic
+std::string renderReport(const ComparisonReport& report,
+                         ExportFormat format,
+                         const JobContext* ctx = nullptr);
+
 // Abstract exporter interface (Dynamic polymorphism 2)
 class ReportExporter {
 public:
