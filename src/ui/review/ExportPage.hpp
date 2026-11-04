@@ -33,6 +33,7 @@ public:
     bool isDemo() const { return isDemo_; }
     bool hasReport() const { return hasReport_; }
     bool isExporting() const { return isExporting_; }
+    bool isPreviewing() const { return isPreviewing_; }
     const xray::review::ComparisonReport& currentReport() const { return currentReport_; }
 
     void cancel();
@@ -41,6 +42,8 @@ signals:
     void exportCompleted(const QString& path, std::uintmax_t bytesWritten);
     void exportCancelled();
     void exportFailed(const QString& message);
+    void previewCompleted();
+    void previewCancelled();
 
 private slots:
     void onExportFormatChanged();    // D-H10
@@ -67,6 +70,7 @@ private:
     std::stop_source stopSource_;
     JobId currentJobId_ = 0;
     bool isExporting_ = false;
+    bool isPreviewing_ = false;
 };
 
 } // namespace xray::ui::review
