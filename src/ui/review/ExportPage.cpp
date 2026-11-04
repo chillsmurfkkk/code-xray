@@ -8,6 +8,8 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QProgressBar>
+#include <QThread>
 
 namespace xray::ui::review {
 
@@ -95,7 +97,22 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent)
     exportButton_->setProperty("role", "primaryAction");
     actionsLayout->addWidget(exportButton_);
 
+    cancelButton_ = new QPushButton(QString::fromUtf8("Скасувати"));
+    cancelButton_->setObjectName("exportCancelButton");
+    cancelButton_->setMinimumHeight(32);
+    cancelButton_->setProperty("role", "secondaryAction");
+    cancelButton_->setVisible(false);
+    actionsLayout->addWidget(cancelButton_);
+
     mainLayout->addLayout(actionsLayout);
+
+    // --- Прогрес експорту ---
+    progressBar_ = new QProgressBar;
+    progressBar_->setObjectName("exportProgressBar");
+    progressBar_->setRange(0, 100);
+    progressBar_->setValue(0);
+    progressBar_->setVisible(false);
+    mainLayout->addWidget(progressBar_);
 
     // --- Статус ---
     statusLabel_ = new QLabel;
@@ -116,9 +133,26 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent)
             this, &ExportPage::onExportFormatChanged);
     connect(previewButton_, &QPushButton::clicked, this, &ExportPage::onPreviewRequested);
     connect(exportButton_, &QPushButton::clicked, this, &ExportPage::onExportRequested);
+    connect(cancelButton_, &QPushButton::clicked, this, &ExportPage::cancel);
 
     // Демо-дані
     setReport(makeDemoComparisonReport(), /*isDemo=*/true);
+}
+
+ExportPage::~ExportPage()
+{
+    cancel();
+    if (workerThread_) {
+        workerThread_->wait();
+    }
+}
+
+void ExportPage::cancel()
+{
+    if (isExporting_) {
+        stopSource_.request_stop();
+        statusLabel_->setText(QString::fromUtf8("Скасування експорту…"));
+    }
 }
 
 void ExportPage::setReport(const xray::review::ComparisonReport& report, bool isDemo)
@@ -163,61 +197,16 @@ void ExportPage::onPreviewRequested()
 {
     if (!hasReport_) {
         statusLabel_->setText(QString::fromUtf8("Немає звіту для попереднього перегляду."));
+        if (isVisible()) {
+            QMessageBox::warning(this, QString::fromUtf8("Попередній перегляд"),
+                                 QString::fromUtf8("Немає звіту для попереднього перегляду."));
+        }
         return;
     }
 
-    auto fmt = formatCombo_->currentData().toInt();
-    if (fmt == static_cast<int>(ExportFormat::json)) {
-        nlohmann::json root;
-        root["schemaVersion"] = "comparison-v1";
-        root["baseId"] = currentReport_.baseId;
-        root["targetId"] = currentReport_.targetId;
-        root["analysisFingerprint"] = currentReport_.analysisFingerprint;
-        root["metricSchemaVersion"] = currentReport_.metricSchemaVersion;
-        root["summary"] = summarizeComparison(currentReport_.items);
-
-        nlohmann::json items = nlohmann::json::array();
-        for (const auto& it : currentReport_.items) {
-            nlohmann::json j;
-            j["entityKey"] = it.entityKey;
-            switch (it.kind) {
-            case ReviewKind::added:     j["kind"] = "added"; break;
-            case ReviewKind::removed:   j["kind"] = "removed"; break;
-            case ReviewKind::changed:   j["kind"] = "changed"; break;
-            case ReviewKind::unchanged: j["kind"] = "unchanged"; break;
-            case ReviewKind::unmatched: j["kind"] = "unmatched"; break;
-            }
-            j["explanation"] = it.explanation;
-            items.push_back(j);
-        }
-        root["items"] = items;
-        previewArea_->setPlainText(QString::fromStdString(root.dump(2)));
-    } else {
-        auto model = buildReportModel(currentReport_);
-        QString preview;
-        preview += "<!DOCTYPE html>\n<html>\n<head>\n";
-        preview += "  <meta charset=\"UTF-8\">\n";
-        preview += "  <title>Code Xray Comparison Report</title>\n";
-        preview += "</head>\n<body>\n";
-        preview += "  <h1>Code Xray Comparison Report</h1>\n";
-        preview += "  <p><strong>Base:</strong> " + QString::fromStdString(model.baseId) + "</p>\n";
-        preview += "  <p><strong>Target:</strong> " + QString::fromStdString(model.targetId) + "</p>\n";
-        preview += "  <p><strong>Summary:</strong> " + QString::fromStdString(model.summary) + "</p>\n";
-        preview += "  <p><strong>Total Items:</strong> " + QString::number(model.totalItems) + "</p>\n";
-        preview += "  <table border=\"1\" cellpadding=\"6\" cellspacing=\"0\">\n";
-        preview += "    <tr><th>Kind</th><th>Entity</th><th>Path</th><th>Metrics</th><th>Explanation</th></tr>\n";
-        for (const auto& r : model.rows) {
-            preview += "    <tr>";
-            preview += "<td>" + QString::fromStdString(r.kind) + "</td>";
-            preview += "<td>" + QString::fromStdString(r.entityKey) + "</td>";
-            preview += "<td>" + QString::fromStdString(r.path) + "</td>";
-            preview += "<td>" + QString::fromStdString(r.metricsSummary) + "</td>";
-            preview += "<td>" + QString::fromStdString(r.explanation) + "</td>";
-            preview += "</tr>\n";
-        }
-        preview += "  </table>\n</body>\n</html>";
-        previewArea_->setPlainText(preview);
-    }
+    auto format = static_cast<ExportFormat>(formatCombo_->currentData().toInt());
+    std::string previewContent = renderReport(currentReport_, format, nullptr);
+    previewArea_->setPlainText(QString::fromStdString(previewContent));
 
     const QString prefix = isDemo_ ? QString::fromUtf8("[Демо] ") : "";
     statusLabel_->setText(QString::fromUtf8("%1Попередній перегляд сформовано.").arg(prefix));
@@ -226,6 +215,10 @@ void ExportPage::onPreviewRequested()
 // D-H12
 void ExportPage::onExportRequested()
 {
+    if (isExporting_) {
+        return;
+    }
+
     if (!hasReport_) {
         statusLabel_->setText(QString::fromUtf8("Немає звіту для експорту."));
         if (isVisible()) {
@@ -253,6 +246,7 @@ void ExportPage::onExportRequested()
                 QMessageBox::Yes | QMessageBox::No);
             if (answer != QMessageBox::Yes) {
                 statusLabel_->setText(QString::fromUtf8("Експорт скасовано."));
+                emit exportCancelled();
                 return;
             }
         }
@@ -264,23 +258,84 @@ void ExportPage::onExportRequested()
     options.format = static_cast<ExportFormat>(formatCombo_->currentData().toInt());
     options.overwriteConfirmed = overwriteConfirmed;
 
-    JobContext ctx;
-    auto result = exportReport(currentReport_, options, ctx);
-
-    if (std::holds_alternative<Cancelled>(result)) {
-        statusLabel_->setText(QString::fromUtf8("Експорт скасовано."));
-    } else if (std::holds_alternative<Error>(result)) {
-        const auto& err = std::get<Error>(result);
-        statusLabel_->setText(QString::fromUtf8("Помилка експорту: ") + QString::fromStdString(err.message));
-        if (isVisible()) {
-            QMessageBox::critical(this, QString::fromUtf8("Помилка експорту"),
-                                  QString::fromStdString(err.message));
-        }
-    } else if (auto* receipt = std::get_if<ExportReceipt>(&result)) {
-        statusLabel_->setText(QString::fromUtf8("Успішно збережено: %1 (%2 байт)")
-            .arg(QString::fromStdString(receipt->path.string()))
-            .arg(receipt->bytesWritten));
+    if (workerThread_ && workerThread_->isRunning()) {
+        workerThread_->wait();
     }
+
+    isExporting_ = true;
+    exportButton_->setEnabled(false);
+    cancelButton_->setVisible(true);
+    progressBar_->setValue(0);
+    progressBar_->setVisible(true);
+    statusLabel_->setText(QString::fromUtf8("Експорт звіту…"));
+
+    stopSource_ = std::stop_source{};
+    const auto token = stopSource_.get_token();
+    const auto jobId = ++currentJobId_;
+
+    workerThread_ = QThread::create([this, report = currentReport_, options, jobId, token]() {
+        using ExportRes = Result<ExportReceipt>;
+        auto result = std::make_shared<ExportRes>(Cancelled{});
+
+        try {
+            JobContext ctx;
+            ctx.jobId = jobId;
+            ctx.stopToken = token;
+            ctx.onProgress = [this, jobId](const Progress& p) {
+                QMetaObject::invokeMethod(this, [this, jobId, p]() {
+                    if (jobId == currentJobId_ && isExporting_) {
+                        int pct = (p.total.has_value() && *p.total > 0)
+                            ? static_cast<int>((p.completed * 100) / *p.total)
+                            : static_cast<int>(p.completed);
+                        progressBar_->setValue(pct);
+                        statusLabel_->setText(QString::fromUtf8("Експорт: %1 (%2%)")
+                            .arg(QString::fromStdString(p.stage))
+                            .arg(pct));
+                    }
+                }, Qt::QueuedConnection);
+            };
+
+            *result = exportReport(report, options, ctx);
+        } catch (const std::exception& e) {
+            *result = Error{ErrorCode::export_error, e.what()};
+        } catch (...) {
+            *result = Error{ErrorCode::export_error, "Невідома помилка під час експорту"};
+        }
+
+        QMetaObject::invokeMethod(this, [this, jobId, result]() {
+            if (jobId != currentJobId_) {
+                return;
+            }
+
+            isExporting_ = false;
+            exportButton_->setEnabled(true);
+            cancelButton_->setVisible(false);
+            progressBar_->setVisible(false);
+
+            if (stopSource_.stop_requested() || std::holds_alternative<Cancelled>(*result)) {
+                statusLabel_->setText(QString::fromUtf8("Експорт скасовано."));
+                emit exportCancelled();
+                return;
+            }
+
+            if (std::holds_alternative<Error>(*result)) {
+                const auto& err = std::get<Error>(*result);
+                statusLabel_->setText(QString::fromUtf8("Помилка експорту: ") + QString::fromStdString(err.message));
+                if (isVisible()) {
+                    QMessageBox::critical(this, QString::fromUtf8("Помилка експорту"),
+                                          QString::fromStdString(err.message));
+                }
+                emit exportFailed(QString::fromStdString(err.message));
+            } else if (auto* receipt = std::get_if<ExportReceipt>(result.get())) {
+                statusLabel_->setText(QString::fromUtf8("Успішно збережено: %1 (%2 байт)")
+                    .arg(QString::fromStdString(receipt->path.string()))
+                    .arg(static_cast<qlonglong>(receipt->bytesWritten)));
+                emit exportCompleted(QString::fromStdString(receipt->path.string()), receipt->bytesWritten);
+            }
+        }, Qt::QueuedConnection);
+    });
+
+    workerThread_->start();
 }
 
 } // namespace xray::ui::review
