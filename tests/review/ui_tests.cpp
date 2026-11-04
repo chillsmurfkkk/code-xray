@@ -16,6 +16,7 @@
 #include "ui/review/ChangeCardPage.hpp"
 #include "ui/review/review_fixtures.hpp"
 #include "app/main_window.hpp"
+#include "app/coordinator.hpp"
 #include "ui/shared/navigation.hpp"
 #include "ui/shared/theme.hpp"
 
@@ -33,8 +34,14 @@ T* findControl(QWidget* parent, const QString& name) {
 
 xray::review::ComparisonReport makeRealComparisonReport() {
     auto rep = xray::ui::review::makeDemoComparisonReport();
-    rep.baseId = "commit_base_001";
-    rep.targetId = "commit_target_002";
+    rep.baseId = "analysis_fingerprint_base";
+    rep.targetId = "analysis_fingerprint_target";
+    if (rep.base && rep.base->parsed && rep.base->parsed->source) {
+        const_cast<xray::code::SourceSnapshot*>(rep.base->parsed->source.get())->commitOid = "git_oid_base_111";
+    }
+    if (rep.target && rep.target->parsed && rep.target->parsed->source) {
+        const_cast<xray::code::SourceSnapshot*>(rep.target->parsed->source.get())->commitOid = "git_oid_target_222";
+    }
     return rep;
 }
 
@@ -67,12 +74,14 @@ private slots:
 
         // Завантажуємо реальний звіт
         auto realReport = makeRealComparisonReport();
-        page.setReport(realReport, /*isDemo=*/false, "commit_base_001", "commit_target_002");
+        page.setReport(realReport, /*isDemo=*/false, "git_oid_base_111", "git_oid_target_222");
 
         QVERIFY(demoBadge->isHidden());
         QVERIFY(!page.isDemo());
-        QCOMPARE(page.currentReport().baseId, std::string("commit_base_001"));
-        QCOMPARE(page.currentReport().targetId, std::string("commit_target_002"));
+        QCOMPARE(page.currentReport().baseId, std::string("analysis_fingerprint_base"));
+        QCOMPARE(page.currentReport().targetId, std::string("analysis_fingerprint_target"));
+        QCOMPARE(page.baseOid(), QString("git_oid_base_111"));
+        QCOMPARE(page.targetOid(), QString("git_oid_target_222"));
 
         // Перевіряємо сигнал запиту перебудови реального звіту
         QSignalSpy rebuildSpy(&page, &xray::ui::review::ComparisonPage::compareRebuildRequested);
@@ -84,14 +93,14 @@ private slots:
         // Реальний звіт НЕ замінено на демо!
         QVERIFY(!page.isDemo());
         QVERIFY(demoBadge->isHidden());
-        QCOMPARE(page.currentReport().baseId, std::string("commit_base_001"));
-        QCOMPARE(page.currentReport().targetId, std::string("commit_target_002"));
+        QCOMPARE(page.currentReport().baseId, std::string("analysis_fingerprint_base"));
+        QCOMPARE(page.currentReport().targetId, std::string("analysis_fingerprint_target"));
 
-        // Сигнал compareRebuildRequested емітовано з правильними хешами комітів
+        // Сигнал compareRebuildRequested емітовано з Git commitOid, а не analysis fingerprint!
         QCOMPARE(rebuildSpy.count(), 1);
         auto args = rebuildSpy.takeFirst();
-        QCOMPARE(args.at(0).toString(), QString("commit_base_001"));
-        QCOMPARE(args.at(1).toString(), QString("commit_target_002"));
+        QCOMPARE(args.at(0).toString(), QString("git_oid_base_111"));
+        QCOMPARE(args.at(1).toString(), QString("git_oid_target_222"));
         QCOMPARE(compareSpy.count(), 1);
 
         // Перевірка фільтрації та вибору елементів
@@ -175,8 +184,10 @@ private slots:
         auto previewJson = nlohmann::json::parse(previewArea->toPlainText().toStdString(), nullptr, false);
         QVERIFY(!previewJson.is_discarded());
 
-        // Збереження файлу
+        // Збереження файлу (у фоновому потоці)
+        QSignalSpy jsonCompletedSpy(&page, &xray::ui::review::ExportPage::exportCompleted);
         saveBtn->click();
+        QVERIFY(jsonCompletedSpy.wait(5000));
         QVERIFY(QFile::exists(jsonPath));
         QVERIFY(statusLabel->text().contains(QString::fromUtf8("Успішно збережено")));
 
@@ -191,8 +202,12 @@ private slots:
         QVERIFY(parsed.contains("baseId"));
         QVERIFY(parsed.contains("targetId"));
         QVERIFY(parsed.contains("items"));
-        QCOMPARE(parsed["baseId"].get<std::string>(), std::string("commit_base_001"));
-        QCOMPARE(parsed["targetId"].get<std::string>(), std::string("commit_target_002"));
+        QCOMPARE(parsed["baseId"].get<std::string>(), std::string("analysis_fingerprint_base"));
+        QCOMPARE(parsed["targetId"].get<std::string>(), std::string("analysis_fingerprint_target"));
+
+        // Прев'ю та збережений JSON мають ідентичні дані (coverage, items, summary)
+        QCOMPARE(parsed["items"].size(), previewJson["items"].size());
+        QCOMPARE(parsed["summary"].get<std::string>(), previewJson["summary"].get<std::string>());
 
         // --- Експорт у HTML ---
         const int htmlIdx = formatCombo->findData(static_cast<int>(xray::review::ExportFormat::html));
@@ -202,10 +217,13 @@ private slots:
 
         // Перевірка попереднього перегляду HTML
         previewBtn->click();
-        QVERIFY(previewArea->toPlainText().contains("<html") || previewArea->toPlainText().contains("<!DOCTYPE"));
+        QString previewHtml = previewArea->toPlainText();
+        QVERIFY(previewHtml.contains("<html") || previewHtml.contains("<!DOCTYPE"));
 
-        // Збереження файлу
+        // Збереження файлу (у фоновому потоці)
+        QSignalSpy htmlCompletedSpy(&page, &xray::ui::review::ExportPage::exportCompleted);
         saveBtn->click();
+        QVERIFY(htmlCompletedSpy.wait(5000));
         QVERIFY(QFile::exists(htmlPath));
         QVERIFY(statusLabel->text().contains(QString::fromUtf8("Успішно збережено")));
 
@@ -216,8 +234,10 @@ private slots:
         htmlFile.close();
 
         QVERIFY(htmlContent.contains("<html", Qt::CaseInsensitive));
-        QVERIFY(htmlContent.contains("commit_base_001"));
-        QVERIFY(htmlContent.contains("commit_target_002"));
+        QVERIFY(htmlContent.contains("analysis_fingerprint_base"));
+        QVERIFY(htmlContent.contains("analysis_fingerprint_target"));
+        // Прев'ю та файл згенеровані через спільну серіалізацію
+        QCOMPARE(previewHtml, htmlContent);
     }
 
     // 4. Помилка та скасування коректно обробляються й показуються в UI
@@ -251,6 +271,29 @@ private slots:
             saveBtn->click();
             QVERIFY(statusLabel->text().contains(QString::fromUtf8("Вкажіть шлях")));
         }
+
+        // ExportPage: асинхронне скасування експорту
+        {
+            xray::ui::review::ExportPage exportPage;
+            auto realReport = makeRealComparisonReport();
+            exportPage.setReport(realReport, /*isDemo=*/false);
+
+            QTemporaryDir tempDir;
+            QVERIFY(tempDir.isValid());
+            auto* pathEdit = findControl<QLineEdit>(&exportPage, "exportPathEdit");
+            auto* saveBtn = findControl<QPushButton>(&exportPage, "exportSaveButton");
+            auto* cancelBtn = findControl<QPushButton>(&exportPage, "exportCancelButton");
+            auto* statusLabel = findControl<QLabel>(&exportPage, "exportStatusLabel");
+
+            pathEdit->setText(tempDir.filePath("cancelled.json"));
+
+            QSignalSpy cancelledSpy(&exportPage, &xray::ui::review::ExportPage::exportCancelled);
+            saveBtn->click();
+            cancelBtn->click();
+            QVERIFY(cancelledSpy.wait(5000));
+            QVERIFY(!exportPage.isExporting());
+            QVERIFY(statusLabel->text().contains(QString::fromUtf8("скасовано")));
+        }
     }
 
     // 5. Інтеграційний тест MainWindow: зв'язок Coordinator -> ComparisonPage, TrendPage, ExportPage
@@ -271,6 +314,35 @@ private slots:
         auto* compTable = window.findChild<QTableWidget*>("comparisonReviewTable");
         QVERIFY(compTable != nullptr);
         QVERIFY(compTable->isVisible());
+
+        // Перевіряємо реакцію на comparisonCompleted: координатор передає звіт
+        auto realRep = makeRealComparisonReport();
+        emit window.coordinator()->comparisonCompleted(realRep);
+        qApp->processEvents();
+
+        auto* compPage = window.findChild<xray::ui::review::ComparisonPage*>();
+        QVERIFY(compPage != nullptr);
+        // [P1] Перевіряємо, що беруться Git commitOid зі знімків, а не analysis ID!
+        QCOMPARE(compPage->baseOid(), QString("git_oid_base_111"));
+        QCOMPARE(compPage->targetOid(), QString("git_oid_target_222"));
+
+        auto* trPage = window.findChild<xray::ui::review::TrendPage*>();
+        QVERIFY(trPage != nullptr);
+        // [P1] Перевіряємо tipOid для тренду — це commitOid цільового коміту!
+        QCOMPARE(trPage->repositoryTip(), QString("git_oid_target_222"));
+
+        // [P1] Перевіряємо, що в списку сутностей тренду міститься саме identityKey ("add(int,int)"), а не тільки коротке ім'я "add"
+        auto* entityCombo = window.findChild<QComboBox*>("trendEntityCombo");
+        QVERIFY(entityCombo != nullptr);
+        bool foundIdentityKey = false;
+        for (int i = 0; i < entityCombo->count(); ++i) {
+            if (entityCombo->itemData(i).toString().contains("add(int,int)") ||
+                entityCombo->itemData(i).toString().contains("multiply(int,int)")) {
+                foundIdentityKey = true;
+                break;
+            }
+        }
+        QVERIFY(foundIdentityKey);
 
         // Перехід до сторінки 1 (Динаміка)
         nav->setCurrentPage(xray::ui::Section::review, 1);
