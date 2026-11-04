@@ -178,8 +178,10 @@ private slots:
         QString jsonPath = tempDir.filePath("test_report.json");
         pathEdit->setText(jsonPath);
 
-        // Перевірка попереднього перегляду JSON
+        // Перевірка попереднього перегляду JSON (асинхронно)
+        QSignalSpy jsonPreviewSpy(&page, &xray::ui::review::ExportPage::previewCompleted);
         previewBtn->click();
+        QVERIFY(jsonPreviewSpy.wait(5000));
         QVERIFY(!previewArea->toPlainText().isEmpty());
         auto previewJson = nlohmann::json::parse(previewArea->toPlainText().toStdString(), nullptr, false);
         QVERIFY(!previewJson.is_discarded());
@@ -215,8 +217,10 @@ private slots:
         QString htmlPath = tempDir.filePath("test_report.html");
         pathEdit->setText(htmlPath);
 
-        // Перевірка попереднього перегляду HTML
+        // Перевірка попереднього перегляду HTML (асинхронно)
+        QSignalSpy htmlPreviewSpy(&page, &xray::ui::review::ExportPage::previewCompleted);
         previewBtn->click();
+        QVERIFY(htmlPreviewSpy.wait(5000));
         QString previewHtml = previewArea->toPlainText();
         QVERIFY(previewHtml.contains("<html") || previewHtml.contains("<!DOCTYPE"));
 
@@ -292,6 +296,24 @@ private slots:
             cancelBtn->click();
             QVERIFY(cancelledSpy.wait(5000));
             QVERIFY(!exportPage.isExporting());
+            QVERIFY(statusLabel->text().contains(QString::fromUtf8("скасовано")));
+        }
+
+        // ExportPage: асинхронне скасування прев'ю
+        {
+            xray::ui::review::ExportPage exportPage;
+            auto realReport = makeRealComparisonReport();
+            exportPage.setReport(realReport, /*isDemo=*/false);
+
+            auto* previewBtn = findControl<QPushButton>(&exportPage, "exportPreviewButton");
+            auto* cancelBtn = findControl<QPushButton>(&exportPage, "exportCancelButton");
+            auto* statusLabel = findControl<QLabel>(&exportPage, "exportStatusLabel");
+
+            QSignalSpy cancelledSpy(&exportPage, &xray::ui::review::ExportPage::previewCancelled);
+            previewBtn->click();
+            cancelBtn->click();
+            QVERIFY(cancelledSpy.wait(5000));
+            QVERIFY(!exportPage.isPreviewing());
             QVERIFY(statusLabel->text().contains(QString::fromUtf8("скасовано")));
         }
     }
