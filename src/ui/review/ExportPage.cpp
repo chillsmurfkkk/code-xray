@@ -149,9 +149,13 @@ ExportPage::~ExportPage()
 
 void ExportPage::cancel()
 {
-    if (isExporting_) {
+    if (isExporting_ || isPreviewing_) {
         stopSource_.request_stop();
-        statusLabel_->setText(QString::fromUtf8("Скасування експорту…"));
+        if (isExporting_) {
+            statusLabel_->setText(QString::fromUtf8("Скасування експорту…"));
+        } else if (isPreviewing_) {
+            statusLabel_->setText(QString::fromUtf8("Скасування попереднього перегляду…"));
+        }
     }
 }
 
@@ -195,6 +199,10 @@ void ExportPage::onExportFormatChanged()
 // D-H11
 void ExportPage::onPreviewRequested()
 {
+    if (isExporting_ || isPreviewing_) {
+        return;
+    }
+
     if (!hasReport_) {
         statusLabel_->setText(QString::fromUtf8("Немає звіту для попереднього перегляду."));
         if (isVisible()) {
@@ -204,18 +212,84 @@ void ExportPage::onPreviewRequested()
         return;
     }
 
-    auto format = static_cast<ExportFormat>(formatCombo_->currentData().toInt());
-    std::string previewContent = renderReport(currentReport_, format, nullptr);
-    previewArea_->setPlainText(QString::fromStdString(previewContent));
+    if (workerThread_ && workerThread_->isRunning()) {
+        workerThread_->wait();
+    }
 
-    const QString prefix = isDemo_ ? QString::fromUtf8("[Демо] ") : "";
-    statusLabel_->setText(QString::fromUtf8("%1Попередній перегляд сформовано.").arg(prefix));
+    isPreviewing_ = true;
+    previewButton_->setEnabled(false);
+    exportButton_->setEnabled(false);
+    cancelButton_->setVisible(true);
+    progressBar_->setValue(0);
+    progressBar_->setVisible(true);
+    statusLabel_->setText(QString::fromUtf8("Формування попереднього перегляду…"));
+
+    stopSource_ = std::stop_source{};
+    const auto token = stopSource_.get_token();
+    const auto jobId = ++currentJobId_;
+    const auto format = static_cast<ExportFormat>(formatCombo_->currentData().toInt());
+
+    workerThread_ = QThread::create([this, report = currentReport_, format, jobId, token]() {
+        std::string previewContent;
+        bool wasCancelled = false;
+
+        try {
+            JobContext ctx;
+            ctx.jobId = jobId;
+            ctx.stopToken = token;
+            ctx.onProgress = [this, jobId](const Progress& p) {
+                QMetaObject::invokeMethod(this, [this, jobId, p]() {
+                    if (jobId == currentJobId_ && isPreviewing_) {
+                        int pct = (p.total.has_value() && *p.total > 0)
+                            ? static_cast<int>((p.completed * 100) / *p.total)
+                            : static_cast<int>(p.completed);
+                        progressBar_->setValue(pct);
+                        statusLabel_->setText(QString::fromUtf8("Прев'ю: %1 (%2%)")
+                            .arg(QString::fromStdString(p.stage))
+                            .arg(pct));
+                    }
+                }, Qt::QueuedConnection);
+            };
+
+            previewContent = renderReport(report, format, &ctx);
+            if (ctx.isCancelled()) {
+                wasCancelled = true;
+            }
+        } catch (...) {
+            wasCancelled = true;
+        }
+
+        QMetaObject::invokeMethod(this, [this, jobId, previewContent = std::move(previewContent), wasCancelled]() {
+            if (jobId != currentJobId_) {
+                return;
+            }
+
+            isPreviewing_ = false;
+            previewButton_->setEnabled(true);
+            exportButton_->setEnabled(true);
+            cancelButton_->setVisible(false);
+            progressBar_->setVisible(false);
+
+            if (wasCancelled || stopSource_.stop_requested()) {
+                statusLabel_->setText(QString::fromUtf8("Попередній перегляд скасовано."));
+                emit previewCancelled();
+                return;
+            }
+
+            previewArea_->setPlainText(QString::fromStdString(previewContent));
+            const QString prefix = isDemo_ ? QString::fromUtf8("[Демо] ") : "";
+            statusLabel_->setText(QString::fromUtf8("%1Попередній перегляд сформовано.").arg(prefix));
+            emit previewCompleted();
+        }, Qt::QueuedConnection);
+    });
+
+    workerThread_->start();
 }
 
 // D-H12
 void ExportPage::onExportRequested()
 {
-    if (isExporting_) {
+    if (isExporting_ || isPreviewing_) {
         return;
     }
 
@@ -264,6 +338,7 @@ void ExportPage::onExportRequested()
 
     isExporting_ = true;
     exportButton_->setEnabled(false);
+    previewButton_->setEnabled(false);
     cancelButton_->setVisible(true);
     progressBar_->setValue(0);
     progressBar_->setVisible(true);
@@ -309,8 +384,19 @@ void ExportPage::onExportRequested()
 
             isExporting_ = false;
             exportButton_->setEnabled(true);
+            previewButton_->setEnabled(true);
             cancelButton_->setVisible(false);
             progressBar_->setVisible(false);
+
+            // [P2] Якщо файл уже успішно збережено, обов'язково повідомляємо про успіх,
+            // навіть якщо запит на скасування прийшов перед обробкою в GUI-потоці.
+            if (auto* receipt = std::get_if<ExportReceipt>(result.get())) {
+                statusLabel_->setText(QString::fromUtf8("Успішно збережено: %1 (%2 байт)")
+                    .arg(QString::fromStdString(receipt->path.string()))
+                    .arg(static_cast<qlonglong>(receipt->bytesWritten)));
+                emit exportCompleted(QString::fromStdString(receipt->path.string()), receipt->bytesWritten);
+                return;
+            }
 
             if (stopSource_.stop_requested() || std::holds_alternative<Cancelled>(*result)) {
                 statusLabel_->setText(QString::fromUtf8("Експорт скасовано."));
@@ -326,11 +412,6 @@ void ExportPage::onExportRequested()
                                           QString::fromStdString(err.message));
                 }
                 emit exportFailed(QString::fromStdString(err.message));
-            } else if (auto* receipt = std::get_if<ExportReceipt>(result.get())) {
-                statusLabel_->setText(QString::fromUtf8("Успішно збережено: %1 (%2 байт)")
-                    .arg(QString::fromStdString(receipt->path.string()))
-                    .arg(static_cast<qlonglong>(receipt->bytesWritten)));
-                emit exportCompleted(QString::fromStdString(receipt->path.string()), receipt->bytesWritten);
             }
         }, Qt::QueuedConnection);
     });
