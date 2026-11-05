@@ -316,6 +316,25 @@ private slots:
             QVERIFY(!exportPage.isPreviewing());
             QVERIFY(statusLabel->text().contains(QString::fromUtf8("скасовано")));
         }
+
+        // ExportPage: [P2] заміна звіту відкидає старе прев'ю
+        {
+            xray::ui::review::ExportPage exportPage;
+            auto report1 = makeRealComparisonReport();
+            exportPage.setReport(report1, /*isDemo=*/false);
+
+            auto* previewBtn = findControl<QPushButton>(&exportPage, "exportPreviewButton");
+            auto* previewArea = findControl<QTextEdit>(&exportPage, "exportPreviewArea");
+
+            previewBtn->click();
+            // Встановлюємо новий звіт під час або після запиту прев'ю
+            auto report2 = makeRealComparisonReport();
+            report2.targetId = "second_report_target_oid";
+            exportPage.setReport(report2, /*isDemo=*/false);
+
+            QVERIFY(previewArea->toPlainText().isEmpty());
+            QVERIFY(!exportPage.isPreviewing());
+        }
     }
 
     // 5. Інтеграційний тест MainWindow: зв'язок Coordinator -> ComparisonPage, TrendPage, ExportPage

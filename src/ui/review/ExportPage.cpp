@@ -142,8 +142,17 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent)
 ExportPage::~ExportPage()
 {
     cancel();
+    cleanupWorkerThread();
+}
+
+void ExportPage::cleanupWorkerThread()
+{
     if (workerThread_) {
-        workerThread_->wait();
+        if (workerThread_->isRunning()) {
+            stopSource_.request_stop();
+            workerThread_->wait();
+        }
+        workerThread_ = nullptr;
     }
 }
 
@@ -161,6 +170,18 @@ void ExportPage::cancel()
 
 void ExportPage::setReport(const xray::review::ComparisonReport& report, bool isDemo)
 {
+    // [P2] Якщо виконується формування прев'ю або експорту для старого звіту, скасовуємо його
+    // та інвалідуємо jobId, щоб застарілий результат не потрапив на сторінку.
+    cancel();
+    ++currentJobId_;
+    isExporting_ = false;
+    isPreviewing_ = false;
+    if (previewButton_) previewButton_->setEnabled(true);
+    if (exportButton_) exportButton_->setEnabled(true);
+    if (cancelButton_) cancelButton_->setVisible(false);
+    if (progressBar_) progressBar_->setVisible(false);
+    if (previewArea_) previewArea_->clear();
+
     currentReport_ = report;
     hasReport_ = true;
     isDemo_ = isDemo;
@@ -212,9 +233,7 @@ void ExportPage::onPreviewRequested()
         return;
     }
 
-    if (workerThread_ && workerThread_->isRunning()) {
-        workerThread_->wait();
-    }
+    cleanupWorkerThread();
 
     isPreviewing_ = true;
     previewButton_->setEnabled(false);
@@ -283,6 +302,14 @@ void ExportPage::onPreviewRequested()
         }, Qt::QueuedConnection);
     });
 
+    // [P3] Звільнення об'єкта QThread після завершення без витоків пам'яті
+    connect(workerThread_, &QThread::finished, workerThread_, &QObject::deleteLater);
+    connect(workerThread_, &QThread::finished, this, [this, thread = workerThread_]() {
+        if (workerThread_ == thread) {
+            workerThread_ = nullptr;
+        }
+    });
+
     workerThread_->start();
 }
 
@@ -332,9 +359,7 @@ void ExportPage::onExportRequested()
     options.format = static_cast<ExportFormat>(formatCombo_->currentData().toInt());
     options.overwriteConfirmed = overwriteConfirmed;
 
-    if (workerThread_ && workerThread_->isRunning()) {
-        workerThread_->wait();
-    }
+    cleanupWorkerThread();
 
     isExporting_ = true;
     exportButton_->setEnabled(false);
@@ -414,6 +439,14 @@ void ExportPage::onExportRequested()
                 emit exportFailed(QString::fromStdString(err.message));
             }
         }, Qt::QueuedConnection);
+    });
+
+    // [P3] Звільнення об'єкта QThread після завершення без витоків пам'яті
+    connect(workerThread_, &QThread::finished, workerThread_, &QObject::deleteLater);
+    connect(workerThread_, &QThread::finished, this, [this, thread = workerThread_]() {
+        if (workerThread_ == thread) {
+            workerThread_ = nullptr;
+        }
     });
 
     workerThread_->start();

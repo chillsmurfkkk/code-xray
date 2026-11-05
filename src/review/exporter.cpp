@@ -568,19 +568,16 @@ Result<ExportReceipt> exportReport(const ComparisonReport& report,
 
     bool success = exporter->write(report, options, ctx);
 
-    if (ctx.isCancelled()) {
-        return Cancelled{};
-    }
-
     if (!success) {
+        if (ctx.isCancelled()) {
+            return Cancelled{};
+        }
         return Error{
             ErrorCode::export_error,
             "exportReport: failed to write report to " + options.destination.string() +
             " (check permissions or overwriteConfirmed flag)"
         };
     }
-
-    if (ctx.isCancelled()) return Cancelled{};
 
     ctx.report("Done", 100, 100);
 
