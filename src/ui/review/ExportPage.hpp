@@ -70,7 +70,8 @@ private:
 
     QThread* workerThread_ = nullptr;
     std::stop_source stopSource_;
-    JobId currentJobId_ = 0;
+    JobId previewJobId_ = 0;
+    JobId exportJobId_ = 0;
     bool isExporting_ = false;
     bool isPreviewing_ = false;
 };

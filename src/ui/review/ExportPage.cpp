@@ -170,16 +170,17 @@ void ExportPage::cancel()
 
 void ExportPage::setReport(const xray::review::ComparisonReport& report, bool isDemo)
 {
-    // [P2] Якщо виконується формування прев'ю або експорту для старого звіту, скасовуємо його
-    // та інвалідуємо jobId, щоб застарілий результат не потрапив на сторінку.
-    cancel();
-    ++currentJobId_;
-    isExporting_ = false;
-    isPreviewing_ = false;
-    if (previewButton_) previewButton_->setEnabled(true);
-    if (exportButton_) exportButton_->setEnabled(true);
-    if (cancelButton_) cancelButton_->setVisible(false);
-    if (progressBar_) progressBar_->setVisible(false);
+    // [P2] Якщо виконується формування прев'ю для старого звіту, скасовуємо його
+    // та інвалідуємо previewJobId_, щоб застарілий результат не потрапив на сторінку.
+    if (isPreviewing_) {
+        stopSource_.request_stop();
+        isPreviewing_ = false;
+        if (previewButton_) previewButton_->setEnabled(true);
+        if (exportButton_) exportButton_->setEnabled(true);
+        if (cancelButton_) cancelButton_->setVisible(false);
+        if (progressBar_) progressBar_->setVisible(false);
+    }
+    ++previewJobId_;
     if (previewArea_) previewArea_->clear();
 
     currentReport_ = report;
@@ -188,11 +189,16 @@ void ExportPage::setReport(const xray::review::ComparisonReport& report, bool is
     if (demoBadge_) {
         demoBadge_->setVisible(isDemo_);
     }
-    const QString prefix = isDemo_ ? QString::fromUtf8("[Демо] ") : "";
-    statusLabel_->setText(
-        QString::fromUtf8("%1Звіт завантажено: %2 елементів.")
-            .arg(prefix)
-            .arg(static_cast<qlonglong>(report.items.size())));
+
+    // [P2] Якщо експорт зараз триває (або завершується запис файла на диск), не скидаємо
+    // його стан та статусний текст, щоб користувач отримав підтвердження про збереження.
+    if (!isExporting_) {
+        const QString prefix = isDemo_ ? QString::fromUtf8("[Демо] ") : "";
+        statusLabel_->setText(
+            QString::fromUtf8("%1Звіт завантажено: %2 елементів.")
+                .arg(prefix)
+                .arg(static_cast<qlonglong>(report.items.size())));
+    }
 }
 
 // D-H10
@@ -245,7 +251,7 @@ void ExportPage::onPreviewRequested()
 
     stopSource_ = std::stop_source{};
     const auto token = stopSource_.get_token();
-    const auto jobId = ++currentJobId_;
+    const auto jobId = ++previewJobId_;
     const auto format = static_cast<ExportFormat>(formatCombo_->currentData().toInt());
 
     workerThread_ = QThread::create([this, report = currentReport_, format, jobId, token]() {
@@ -258,7 +264,7 @@ void ExportPage::onPreviewRequested()
             ctx.stopToken = token;
             ctx.onProgress = [this, jobId](const Progress& p) {
                 QMetaObject::invokeMethod(this, [this, jobId, p]() {
-                    if (jobId == currentJobId_ && isPreviewing_) {
+                    if (jobId == previewJobId_ && isPreviewing_) {
                         int pct = (p.total.has_value() && *p.total > 0)
                             ? static_cast<int>((p.completed * 100) / *p.total)
                             : static_cast<int>(p.completed);
@@ -279,7 +285,7 @@ void ExportPage::onPreviewRequested()
         }
 
         QMetaObject::invokeMethod(this, [this, jobId, previewContent = std::move(previewContent), wasCancelled]() {
-            if (jobId != currentJobId_) {
+            if (jobId != previewJobId_) {
                 return;
             }
 
@@ -371,7 +377,7 @@ void ExportPage::onExportRequested()
 
     stopSource_ = std::stop_source{};
     const auto token = stopSource_.get_token();
-    const auto jobId = ++currentJobId_;
+    const auto jobId = ++exportJobId_;
 
     workerThread_ = QThread::create([this, report = currentReport_, options, jobId, token]() {
         using ExportRes = Result<ExportReceipt>;
@@ -383,7 +389,7 @@ void ExportPage::onExportRequested()
             ctx.stopToken = token;
             ctx.onProgress = [this, jobId](const Progress& p) {
                 QMetaObject::invokeMethod(this, [this, jobId, p]() {
-                    if (jobId == currentJobId_ && isExporting_) {
+                    if (jobId == exportJobId_ && isExporting_) {
                         int pct = (p.total.has_value() && *p.total > 0)
                             ? static_cast<int>((p.completed * 100) / *p.total)
                             : static_cast<int>(p.completed);
@@ -403,7 +409,23 @@ void ExportPage::onExportRequested()
         }
 
         QMetaObject::invokeMethod(this, [this, jobId, result]() {
-            if (jobId != currentJobId_) {
+            // [P2] Якщо файл уже успішно збережено на диск, ми обов'язково окремо обробляємо цей успішний результат
+            // (виводимо статус та випромінюємо exportCompleted), навіть якщо звіт на сторінці змінився!
+            if (auto* receipt = std::get_if<ExportReceipt>(result.get())) {
+                isExporting_ = false;
+                exportButton_->setEnabled(true);
+                previewButton_->setEnabled(true);
+                cancelButton_->setVisible(false);
+                progressBar_->setVisible(false);
+
+                statusLabel_->setText(QString::fromUtf8("Успішно збережено: %1 (%2 байт)")
+                    .arg(QString::fromStdString(receipt->path.string()))
+                    .arg(static_cast<qlonglong>(receipt->bytesWritten)));
+                emit exportCompleted(QString::fromStdString(receipt->path.string()), receipt->bytesWritten);
+                return;
+            }
+
+            if (jobId != exportJobId_) {
                 return;
             }
 
@@ -412,16 +434,6 @@ void ExportPage::onExportRequested()
             previewButton_->setEnabled(true);
             cancelButton_->setVisible(false);
             progressBar_->setVisible(false);
-
-            // [P2] Якщо файл уже успішно збережено, обов'язково повідомляємо про успіх,
-            // навіть якщо запит на скасування прийшов перед обробкою в GUI-потоці.
-            if (auto* receipt = std::get_if<ExportReceipt>(result.get())) {
-                statusLabel_->setText(QString::fromUtf8("Успішно збережено: %1 (%2 байт)")
-                    .arg(QString::fromStdString(receipt->path.string()))
-                    .arg(static_cast<qlonglong>(receipt->bytesWritten)));
-                emit exportCompleted(QString::fromStdString(receipt->path.string()), receipt->bytesWritten);
-                return;
-            }
 
             if (stopSource_.stop_requested() || std::holds_alternative<Cancelled>(*result)) {
                 statusLabel_->setText(QString::fromUtf8("Експорт скасовано."));
