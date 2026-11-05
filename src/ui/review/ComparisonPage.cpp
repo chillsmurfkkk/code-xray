@@ -99,6 +99,12 @@ ComparisonPage::ComparisonPage(QWidget* parent)
     connect(showUnknownCheck_, &QCheckBox::checkStateChanged, this, &ComparisonPage::onReviewFilterChanged);
     connect(compareButton_, &QPushButton::clicked, this, &ComparisonPage::onCompareRequested);
     connect(reviewTable_, &QTableWidget::cellClicked, this, &ComparisonPage::onTableRowSelected);
+    connect(reviewTable_, &QTableWidget::itemSelectionChanged, this, [this]() {
+        auto items = reviewTable_->selectedItems();
+        if (!items.empty()) {
+            onTableRowSelected(items.front()->row(), 0);
+        }
+    });
 
     // Завантажити демо-дані
     setReport(makeDemoComparisonReport(), /*isDemo=*/true);

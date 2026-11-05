@@ -55,7 +55,6 @@ private:
 
     QComboBox*    formatCombo_      = nullptr;  // Список формату
     QLineEdit*    pathEdit_         = nullptr;  // Поле вихідного шляху
-    QCheckBox*    includeCodeCheck_ = nullptr;  // Прапорець фрагментів коду
     QPushButton*  previewButton_    = nullptr;  // Кнопка попереднього перегляду
     QPushButton*  exportButton_     = nullptr;  // Кнопка збереження
     QPushButton*  cancelButton_     = nullptr;  // Кнопка скасування
