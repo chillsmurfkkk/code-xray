@@ -335,6 +335,43 @@ private slots:
             QVERIFY(previewArea->toPlainText().isEmpty());
             QVERIFY(!exportPage.isPreviewing());
         }
+
+        // ExportPage: [P2] якщо файл уже записався, але надійшов новий звіт, результат експорту не відкидається
+        {
+            xray::ui::review::ExportPage exportPage;
+            auto report1 = makeRealComparisonReport();
+            exportPage.setReport(report1, /*isDemo=*/false);
+
+            QTemporaryDir tempDir;
+            QVERIFY(tempDir.isValid());
+            auto exportFile = tempDir.filePath("report1_exported.json");
+
+            auto* pathEdit = findControl<QLineEdit>(&exportPage, "exportPathEdit");
+            pathEdit->setText(exportFile);
+
+            auto* exportBtn = findControl<QPushButton>(&exportPage, "exportSaveButton");
+            auto* statusLabel = findControl<QLabel>(&exportPage, "exportStatusLabel");
+
+            QSignalSpy completedSpy(&exportPage, &xray::ui::review::ExportPage::exportCompleted);
+
+            // Запускаємо експорт першого звіту
+            exportBtn->click();
+
+            // Негайно передаємо новий звіт на сторінку (до або під час завершення запису)
+            auto report2 = makeRealComparisonReport();
+            report2.targetId = "second_report_target_oid";
+            exportPage.setReport(report2, /*isDemo=*/false);
+
+            // Очікуємо сигнал про успішне збереження файлу
+            QVERIFY(completedSpy.wait(5000));
+            QCOMPARE(completedSpy.count(), 1);
+
+            // Файл повинен бути успішно збережений, а статусний текст містити підтвердження
+            QVERIFY(QFile::exists(exportFile));
+            QVERIFY(statusLabel->text().contains(QString::fromUtf8("Успішно збережено")));
+            QVERIFY(statusLabel->text().contains(exportFile));
+            QVERIFY(!exportPage.isExporting());
+        }
     }
 
     // 5. Інтеграційний тест MainWindow: зв'язок Coordinator -> ComparisonPage, TrendPage, ExportPage
