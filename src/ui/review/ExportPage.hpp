@@ -51,6 +51,8 @@ private slots:
     void onExportRequested();        // D-H12
 
 private:
+    void cleanupWorkerThread();
+
     QComboBox*    formatCombo_      = nullptr;  // Список формату
     QLineEdit*    pathEdit_         = nullptr;  // Поле вихідного шляху
     QCheckBox*    includeCodeCheck_ = nullptr;  // Прапорець фрагментів коду
