@@ -47,6 +47,7 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     mainLayout->setSpacing(12);
 
     titleLabel_ = new QLabel(QString::fromUtf8("Картка зміни"));
+    titleLabel_->setObjectName("changeCardTitleLabel");
     auto titleFont = titleLabel_->font();
     titleFont.setPointSize(titleFont.pointSize() + 4);
     titleFont.setBold(true);
@@ -54,17 +55,20 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     mainLayout->addWidget(titleLabel_);
 
     explanationLabel_ = new QLabel;
+    explanationLabel_->setObjectName("changeCardExplanationLabel");
     explanationLabel_->setWordWrap(true);
     mainLayout->addWidget(explanationLabel_);
 
     // --- Код до/після (splitter) ---
     auto* codeSplitter = new QSplitter(Qt::Horizontal);
+    codeSplitter->setObjectName("changeCardCodeSplitter");
     codeSplitter->setHandleWidth(6);
     codeSplitter->setChildrenCollapsible(false);
 
     auto* beforeBox = new QVBoxLayout;
     beforeBox->addWidget(new QLabel(QString::fromUtf8("Код «до»")));
     beforeCodeView_ = new xray::ui::CodeView(this);
+    beforeCodeView_->setObjectName("changeCardBeforeCode");
     auto* beforeWidget = new QWidget;
     beforeBox->addWidget(beforeCodeView_);
     beforeWidget->setLayout(beforeBox);
@@ -72,6 +76,7 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     auto* afterBox = new QVBoxLayout;
     afterBox->addWidget(new QLabel(QString::fromUtf8("Код «після»")));
     afterCodeView_ = new xray::ui::CodeView(this);
+    afterCodeView_->setObjectName("changeCardAfterCode");
     auto* afterWidget = new QWidget;
     afterBox->addWidget(afterCodeView_);
     afterWidget->setLayout(afterBox);
@@ -85,6 +90,7 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
 
     // Таблиця метрик
     metricsTable_ = new QTableWidget;
+    metricsTable_->setObjectName("changeCardMetricsTable");
     metricsTable_->setColumnCount(4);
     metricsTable_->setHorizontalHeaderLabels({
         QString::fromUtf8("Метрика"),
@@ -101,12 +107,15 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     auto* findingsLayout = new QVBoxLayout;
     findingsLayout->addWidget(new QLabel(QString::fromUtf8("Порушення")));
     findingsList_ = new QListWidget;
+    findingsList_->setObjectName("changeCardFindingsList");
     connect(findingsList_, &QListWidget::currentRowChanged, this, &ChangeCardPage::onRelatedFindingSelected);
     findingsLayout->addWidget(findingsList_);
 
     historyButton_ = new QPushButton(QString::fromUtf8("Історія файла"));
+    historyButton_->setObjectName("changeCardHistoryBtn");
     historyButton_->setMinimumHeight(32);
     historyButton_->setProperty("role", "primaryAction");
+    historyButton_->setEnabled(false);
     connect(historyButton_, &QPushButton::clicked, this, &ChangeCardPage::onFileHistoryRequested);
     findingsLayout->addWidget(historyButton_);
 
@@ -250,6 +259,10 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
     }
     if (item.findings.empty()) {
         findingsList_->addItem(QString::fromUtf8("(немає порушень)"));
+    }
+
+    if (historyButton_) {
+        historyButton_->setEnabled(!currentPath_.isEmpty());
     }
 }
 

@@ -438,6 +438,23 @@ private slots:
         QVERIFY(exportPreview != nullptr);
         QVERIFY(exportPreview->isVisible());
 
+        // Перевірка дії «Історія файла» з ChangeCardPage -> перехід у Code Churn
+        nav->setCurrentPage(xray::ui::Section::review, 0);
+        qApp->processEvents();
+        compTable->selectRow(0);
+        qApp->processEvents();
+
+        auto* histBtn = window.findChild<QPushButton*>("changeCardHistoryBtn");
+        QVERIFY(histBtn != nullptr);
+        QVERIFY(histBtn->isEnabled());
+
+        histBtn->click();
+        qApp->processEvents();
+
+        auto* churnPath = window.findChild<QLineEdit*>("churnPathEdit");
+        QVERIFY(churnPath != nullptr);
+        QCOMPARE(churnPath->text(), QString("src/math.cpp"));
+
         window.close();
     }
 };

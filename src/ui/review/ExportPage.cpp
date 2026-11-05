@@ -75,14 +75,8 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent)
 
     mainLayout->addLayout(paramsLayout);
 
-    // --- Прапорець та кнопки ---
+    // --- Кнопки дій ---
     auto* actionsLayout = new QHBoxLayout;
-
-    includeCodeCheck_ = new QCheckBox(QString::fromUtf8("Включити фрагменти коду"));
-    includeCodeCheck_->setObjectName("exportIncludeCodeCheck");
-    includeCodeCheck_->setChecked(true);
-    actionsLayout->addWidget(includeCodeCheck_);
-
     actionsLayout->addStretch();
 
     previewButton_ = new QPushButton(QString::fromUtf8("Попередній перегляд"));
