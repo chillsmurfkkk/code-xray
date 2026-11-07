@@ -156,12 +156,9 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     });
 
     // D-H09: Перехід до історії файла з «Картки зміни» у розділ «Історія» (сторінка Code Churn)
-    connect(changeCardPage_, &ui::review::ChangeCardPage::fileHistoryRequested, this, [this, navigation](const QString& relativePath, const QString& /*commitOid*/) {
+    connect(changeCardPage_, &ui::review::ChangeCardPage::fileHistoryRequested, this, [this, navigation](const QString& relativePath, const QString& commitOid) {
         if (codeChurnPage_ && !relativePath.isEmpty()) {
-            auto* pathEdit = codeChurnPage_->findChild<QLineEdit*>("churnPathEdit");
-            if (pathEdit) {
-                pathEdit->setText(relativePath);
-            }
+            codeChurnPage_->filterByFileAndCommit(relativePath, commitOid);
         }
         navigation->setCurrentPage(ui::Section::history, 2);
     });

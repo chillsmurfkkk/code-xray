@@ -14,6 +14,7 @@
 #include "ui/review/TrendPage.hpp"
 #include "ui/review/ExportPage.hpp"
 #include "ui/review/ChangeCardPage.hpp"
+#include "ui/history/CodeChurnPage.hpp"
 #include "ui/review/review_fixtures.hpp"
 #include "app/main_window.hpp"
 #include "app/coordinator.hpp"
@@ -398,6 +399,30 @@ private slots:
         emit window.coordinator()->comparisonCompleted(realRep);
         qApp->processEvents();
 
+        // Передаємо історію репозиторію з точним комітом і шляхом для перевірки Code Churn
+        xray::history::HistoryResult hist;
+        xray::history::CommitRecord tipCommit;
+        tipCommit.oid = "git_oid_target_222";
+        hist.commits.push_back(tipCommit);
+
+        xray::history::ChangeRecord mathChange;
+        mathChange.commitOid = "git_oid_target_222";
+        mathChange.newPath = "src/math.cpp";
+        mathChange.oldPath = "src/math.cpp";
+        mathChange.status = xray::history::ChangeStatus::modified;
+        mathChange.addedLines = 5;
+        mathChange.deletedLines = 2;
+        hist.changes.push_back(mathChange);
+
+        xray::history::ChangeRecord dummyChange;
+        dummyChange.commitOid = "other_commit_999";
+        dummyChange.newPath = "src/other.cpp";
+        dummyChange.status = xray::history::ChangeStatus::added;
+        hist.changes.push_back(dummyChange);
+
+        emit window.coordinator()->repositoryQueried(hist);
+        qApp->processEvents();
+
         auto* compPage = window.findChild<xray::ui::review::ComparisonPage*>();
         QVERIFY(compPage != nullptr);
         // [P1] Перевіряємо, що беруться Git commitOid зі знімків, а не analysis ID!
@@ -438,22 +463,49 @@ private slots:
         QVERIFY(exportPreview != nullptr);
         QVERIFY(exportPreview->isVisible());
 
-        // Перевірка дії «Історія файла» з ChangeCardPage -> перехід у Code Churn
+        // Перевірка відкриття картки: звичайне виділення рядка (наприклад, клавіатурою) НЕ повинно відкривати картку
         nav->setCurrentPage(xray::ui::Section::review, 0);
         qApp->processEvents();
+        auto* changeCard = window.findChild<xray::ui::review::ChangeCardPage*>();
+        QVERIFY(changeCard != nullptr);
+        QVERIFY(compTable->isVisible());
+        QVERIFY(!changeCard->isVisible());
+
         compTable->selectRow(0);
         qApp->processEvents();
+        // Сторінка все ще має залишатися «Порівняння», клавіатурна навігація не перемикає на картку
+        QVERIFY(compTable->isVisible());
+        QVERIFY(!changeCard->isVisible());
+
+        // Відкриття картки відбувається лише за явною дією користувача (клік по комірці)
+        emit compTable->cellClicked(0, 0);
+        qApp->processEvents();
+        QVERIFY(changeCard->isVisible()); // Картка зміни (ChangeCardPage) відкрита!
 
         auto* histBtn = window.findChild<QPushButton*>("changeCardHistoryBtn");
         QVERIFY(histBtn != nullptr);
         QVERIFY(histBtn->isEnabled());
 
+        // Натискаємо дію «Історія файла»
         histBtn->click();
         qApp->processEvents();
+
+        // Перевіряємо перехід до розділу «Історія» на сторінку Code Churn
+        auto* churnPage = window.findChild<xray::ui::history::CodeChurnPage*>();
+        QVERIFY(churnPage != nullptr);
+        QVERIFY(churnPage->isVisible());
+        QVERIFY(!changeCard->isVisible());
 
         auto* churnPath = window.findChild<QLineEdit*>("churnPathEdit");
         QVERIFY(churnPath != nullptr);
         QCOMPARE(churnPath->text(), QString("src/math.cpp"));
+
+        // Перевіряємо рядки результату: має бути знайдено саме 1 запис із точним шляхом та OID
+        auto* churnTable = window.findChild<QTableWidget*>("churnChangesTable");
+        QVERIFY(churnTable != nullptr);
+        QCOMPARE(churnTable->rowCount(), 1);
+        QCOMPARE(churnTable->item(0, 1)->text(), QString("src/math.cpp"));
+        QCOMPARE(churnTable->item(0, 5)->text(), QString("git_oid_target_222"));
 
         window.close();
     }

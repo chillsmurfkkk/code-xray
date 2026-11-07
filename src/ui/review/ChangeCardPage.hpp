@@ -48,6 +48,7 @@ private:
 
     xray::review::ReviewItem currentItem_;
     QString currentPath_;
+    QString currentCommitOid_;
 };
 
 } // namespace xray::ui::review
