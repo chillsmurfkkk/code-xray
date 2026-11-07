@@ -221,12 +221,7 @@ void CodeChurnPage::onFilterChanged() {
                 if (p == normQuery) matchesPath = true;
             }
 
-            bool matchesOid = true;
-            if (!exactCommitFilter_.isEmpty()) {
-                matchesOid = (ch.commitOid == exactCommitFilter_.toStdString());
-            }
-
-            if (matchesPath && matchesOid) {
+            if (matchesPath) {
                 exactMatches.push_back(ch);
             }
         }

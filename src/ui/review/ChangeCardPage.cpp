@@ -132,23 +132,6 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
     currentPath_.clear();
     currentCommitOid_.clear();
 
-    // Визначаємо точний commitOid для цієї сутності (з цільового знімка або базового для видалених)
-    if (item.kind == ReviewKind::removed) {
-        if (report.base && report.base->parsed && report.base->parsed->source && report.base->parsed->source->commitOid) {
-            currentCommitOid_ = QString::fromStdString(*report.base->parsed->source->commitOid);
-        } else if (!report.baseId.empty()) {
-            currentCommitOid_ = QString::fromStdString(report.baseId);
-        }
-    } else {
-        if (report.target && report.target->parsed && report.target->parsed->source && report.target->parsed->source->commitOid) {
-            currentCommitOid_ = QString::fromStdString(*report.target->parsed->source->commitOid);
-        } else if (report.base && report.base->parsed && report.base->parsed->source && report.base->parsed->source->commitOid) {
-            currentCommitOid_ = QString::fromStdString(*report.base->parsed->source->commitOid);
-        } else if (!report.targetId.empty()) {
-            currentCommitOid_ = QString::fromStdString(report.targetId);
-        }
-    }
-
     const bool isDemo = (report.analysisFingerprint == "fp-demo-v1" || report.baseId == "analysis-base-001");
     if (isDemo) {
         titleLabel_->setText(QString::fromUtf8("[Демо] Картка зміни: ") + QString::fromStdString(item.entityKey));
@@ -160,6 +143,25 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
     // Обов'язково очищаємо обидві панелі коду перед встановленням нового
     beforeCodeView_->setSourceText("");
     afterCodeView_->setSourceText("");
+
+    // Отримуємо OID коміту за sourceId фактичного посилання на код
+    auto getOidForSourceId = [&](const std::string& sourceId) -> QString {
+        if (report.target && report.target->parsed && report.target->parsed->source &&
+            report.target->parsed->source->id == sourceId) {
+            if (report.target->parsed->source->commitOid) {
+                return QString::fromStdString(*report.target->parsed->source->commitOid);
+            }
+            return QString::fromStdString(report.targetId);
+        }
+        if (report.base && report.base->parsed && report.base->parsed->source &&
+            report.base->parsed->source->id == sourceId) {
+            if (report.base->parsed->source->commitOid) {
+                return QString::fromStdString(*report.base->parsed->source->commitOid);
+            }
+            return QString::fromStdString(report.baseId);
+        }
+        return QString();
+    };
 
     // --- Код до/після з урахуванням шляху файла ---
     auto extractCode = [&](const std::string& sourceId, const std::string& relativePath, const code::SourceRange& range) -> QString {
@@ -208,19 +210,22 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
             const auto& ref = item.sourceRefs.front();
             afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
             currentPath_ = QString::fromStdString(ref.relativePath);
+            currentCommitOid_ = getOidForSourceId(ref.sourceId);
         }
     } else if (item.kind == ReviewKind::removed) {
         if (!item.sourceRefs.empty()) {
             const auto& ref = item.sourceRefs.front();
             beforeCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
             currentPath_ = QString::fromStdString(ref.relativePath);
+            currentCommitOid_ = getOidForSourceId(ref.sourceId);
         }
         afterCodeView_->setSourceText(QString::fromUtf8("// (функцію видалено у версії «після»)\n"));
     } else if (item.kind == ReviewKind::unmatched) {
-        // [P2] unmatched: якщо посилання на target, то показуємо в «після», а зліва — заглушку
+        // [P2] unmatched: OID вибирається за sourceId фактичного посилання на код (базовий або цільовий)
         if (!item.sourceRefs.empty()) {
             const auto& ref = item.sourceRefs.front();
             currentPath_ = QString::fromStdString(ref.relativePath);
+            currentCommitOid_ = getOidForSourceId(ref.sourceId);
             if (isTargetSource(ref.sourceId)) {
                 beforeCodeView_->setSourceText(QString::fromUtf8("// (незіставлено: сутність присутня лише у версії «після»)\n"));
                 afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
@@ -242,10 +247,13 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
             }
             beforeCodeView_->setSourceText(extractCode(baseRef->sourceId, baseRef->relativePath, baseRef->range));
             afterCodeView_->setSourceText(extractCode(targetRef->sourceId, targetRef->relativePath, targetRef->range));
-            currentPath_ = QString::fromStdString(targetRef->relativePath.empty() ? baseRef->relativePath : targetRef->relativePath);
+            const auto& chosenRef = targetRef->relativePath.empty() ? *baseRef : *targetRef;
+            currentPath_ = QString::fromStdString(chosenRef.relativePath);
+            currentCommitOid_ = getOidForSourceId(chosenRef.sourceId);
         } else if (!item.sourceRefs.empty()) {
             const auto& ref = item.sourceRefs.front();
             currentPath_ = QString::fromStdString(ref.relativePath);
+            currentCommitOid_ = getOidForSourceId(ref.sourceId);
             if (isTargetSource(ref.sourceId)) {
                 beforeCodeView_->setSourceText(QString::fromUtf8("// (версія «до» недоступна)\n"));
                 afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
@@ -253,6 +261,18 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
                 beforeCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
                 afterCodeView_->setSourceText(QString::fromUtf8("// (версія «після» недоступна)\n"));
             }
+        }
+    }
+
+    if (currentCommitOid_.isEmpty()) {
+        if (report.target && report.target->parsed && report.target->parsed->source && report.target->parsed->source->commitOid) {
+            currentCommitOid_ = QString::fromStdString(*report.target->parsed->source->commitOid);
+        } else if (report.base && report.base->parsed && report.base->parsed->source && report.base->parsed->source->commitOid) {
+            currentCommitOid_ = QString::fromStdString(*report.base->parsed->source->commitOid);
+        } else if (!report.targetId.empty()) {
+            currentCommitOid_ = QString::fromStdString(report.targetId);
+        } else if (!report.baseId.empty()) {
+            currentCommitOid_ = QString::fromStdString(report.baseId);
         }
     }
 

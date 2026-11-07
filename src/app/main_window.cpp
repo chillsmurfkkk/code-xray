@@ -160,6 +160,9 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         if (codeChurnPage_ && !relativePath.isEmpty()) {
             codeChurnPage_->filterByFileAndCommit(relativePath, commitOid);
         }
+        if (coordinator_ && coordinator_->hasRepository() && !relativePath.isEmpty()) {
+            coordinator_->queryFileHistory(relativePath.toStdString(), commitOid.toStdString());
+        }
         navigation->setCurrentPage(ui::Section::history, 2);
     });
 
@@ -272,6 +275,13 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
         trendPage_->setRepositoryTip(res.commits.empty()
             ? QString{}
             : QString::fromStdString(res.commits.front().oid));
+    });
+
+    connect(coordinator_, &Coordinator::fileHistoryQueried, this, [this](const QString& relativePath, const QString& commitOid, const history::HistoryResult& res) {
+        if (codeChurnPage_) {
+            codeChurnPage_->setChanges(res.changes, /*isDemo=*/false);
+            codeChurnPage_->filterByFileAndCommit(relativePath, commitOid);
+        }
     });
 
     connect(coordinator_, &Coordinator::commitSnapshotLoaded, this, [this, navigation](auto snapshot) {
