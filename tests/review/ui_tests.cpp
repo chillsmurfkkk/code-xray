@@ -405,8 +405,9 @@ private slots:
         tipCommit.oid = "git_oid_target_222";
         hist.commits.push_back(tipCommit);
 
+        // [P2] Файл змінився в проміжному коміті, а цільовий коміт змінював інший файл
         xray::history::ChangeRecord mathChange;
-        mathChange.commitOid = "git_oid_target_222";
+        mathChange.commitOid = "intermediate_commit_150";
         mathChange.newPath = "src/math.cpp";
         mathChange.oldPath = "src/math.cpp";
         mathChange.status = xray::history::ChangeStatus::modified;
@@ -415,7 +416,7 @@ private slots:
         hist.changes.push_back(mathChange);
 
         xray::history::ChangeRecord dummyChange;
-        dummyChange.commitOid = "other_commit_999";
+        dummyChange.commitOid = "git_oid_target_222";
         dummyChange.newPath = "src/other.cpp";
         dummyChange.status = xray::history::ChangeStatus::added;
         hist.changes.push_back(dummyChange);
@@ -500,14 +501,58 @@ private slots:
         QVERIFY(churnPath != nullptr);
         QCOMPARE(churnPath->text(), QString("src/math.cpp"));
 
-        // Перевіряємо рядки результату: має бути знайдено саме 1 запис із точним шляхом та OID
+        // Перевіряємо рядки результату: зміна з проміжного коміту відображається, історія не порожня
         auto* churnTable = window.findChild<QTableWidget*>("churnChangesTable");
         QVERIFY(churnTable != nullptr);
         QCOMPARE(churnTable->rowCount(), 1);
         QCOMPARE(churnTable->item(0, 1)->text(), QString("src/math.cpp"));
-        QCOMPARE(churnTable->item(0, 5)->text(), QString("git_oid_target_222"));
+        QCOMPARE(churnTable->item(0, 5)->text(), QString("intermediate_commit_150"));
 
         window.close();
+    }
+
+    // 6. [P2] Перевірка вибору OID для unmatched: OID вибирається за sourceId фактичного посилання
+    void testChangeCard_UnmatchedOidFromActualSourceRef() {
+        xray::ui::review::ChangeCardPage page;
+        auto rep = makeRealComparisonReport();
+
+        // 1. Unmatched сутність, присутня лише в базовому знімку
+        xray::review::ReviewItem itemBase;
+        itemBase.kind = xray::review::ReviewKind::unmatched;
+        itemBase.entityKey = "legacyFunction()";
+        xray::review::SourceRef baseRef;
+        baseRef.sourceId = rep.base->parsed->source->id;
+        baseRef.relativePath = "src/legacy.cpp";
+        itemBase.sourceRefs = { baseRef };
+
+        page.showItem(itemBase, rep);
+
+        QSignalSpy spy(&page, &xray::ui::review::ChangeCardPage::fileHistoryRequested);
+        auto* histBtn = findControl<QPushButton>(&page, "changeCardHistoryBtn");
+        QVERIFY(histBtn->isEnabled());
+        histBtn->click();
+
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.at(0).at(0).toString(), QString("src/legacy.cpp"));
+        // Перевіряємо, що OID взято з БАЗОВОГО знімка (git_oid_base_111), а не цільового!
+        QCOMPARE(spy.at(0).at(1).toString(), QString("git_oid_base_111"));
+
+        // 2. Unmatched сутність, присутня лише в цільовому знімку
+        xray::review::ReviewItem itemTarget;
+        itemTarget.kind = xray::review::ReviewKind::unmatched;
+        itemTarget.entityKey = "futureFunction()";
+        xray::review::SourceRef targetRef;
+        targetRef.sourceId = rep.target->parsed->source->id;
+        targetRef.relativePath = "src/future.cpp";
+        itemTarget.sourceRefs = { targetRef };
+
+        page.showItem(itemTarget, rep);
+        histBtn->click();
+
+        QCOMPARE(spy.count(), 2);
+        QCOMPARE(spy.at(1).at(0).toString(), QString("src/future.cpp"));
+        // Перевіряємо, що OID взято з ЦІЛЬОВОГО знімка (git_oid_target_222)!
+        QCOMPARE(spy.at(1).at(1).toString(), QString("git_oid_target_222"));
     }
 };
 
