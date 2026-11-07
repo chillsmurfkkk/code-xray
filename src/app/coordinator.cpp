@@ -341,7 +341,7 @@ void Coordinator::queryFileHistory(const std::string& relativePath, const std::s
             history::HistoryRequest req;
             req.startOid = startOid;
             req.relativePath = relativePath;
-            req.limit = limit;
+            req.limit = (limit == 0 ? 1000 : limit);
 
             *result = history::query(spec, req, ctx);
         } catch (const std::exception& e) {
@@ -363,7 +363,10 @@ void Coordinator::queryFileHistory(const std::string& relativePath, const std::s
                 emit operationFailed(QString::fromUtf8("Історія файла"), QString::fromStdString(err.message));
             } else if (auto* histRes = std::get_if<history::HistoryResult>(result.get())) {
                 emit fileHistoryQueried(QString::fromStdString(relativePath), QString::fromStdString(startOid), *histRes);
-                emit statusMessage(QString::fromUtf8("Історію файла оновлено: знайдено %1 змін").arg(histRes->changes.size()), 5000);
+                const QString msg = histRes->hasMore
+                    ? QString::fromUtf8("Історію файла оновлено: перші %1 змін (є ще)").arg(histRes->changes.size())
+                    : QString::fromUtf8("Історію файла оновлено: знайдено %1 змін").arg(histRes->changes.size());
+                emit statusMessage(msg, 5000);
             }
         }, Qt::QueuedConnection);
     });

@@ -157,7 +157,10 @@ void CodeChurnPage::changeEvent(QEvent* event) {
 }
 
 void CodeChurnPage::setChanges(const std::vector<xray::history::ChangeRecord>& changes, bool isDemo) {
+    repositoryChanges_ = changes;
     rawChanges_ = changes;
+    isFileHistoryMode_ = false;
+    hasMore_ = false;
     isDemo_ = isDemo;
     if (demoBadge_) {
         demoBadge_->setVisible(isDemo_);
@@ -165,9 +168,33 @@ void CodeChurnPage::setChanges(const std::vector<xray::history::ChangeRecord>& c
     onResetFilter();
 }
 
+void CodeChurnPage::setFileHistory(const QString& relativePath, const QString& commitOid,
+                                   const std::vector<xray::history::ChangeRecord>& fileChanges,
+                                   bool hasMore) {
+    fileHistoryChanges_ = fileChanges;
+    isFileHistoryMode_ = true;
+    hasMore_ = hasMore;
+    exactPathFilter_ = relativePath.trimmed();
+    exactCommitFilter_ = commitOid.trimmed();
+
+    if (pathEdit_) {
+        QSignalBlocker blocker(pathEdit_);
+        pathEdit_->setText(relativePath);
+    }
+    if (statusCombo_) {
+        QSignalBlocker blocker(statusCombo_);
+        statusCombo_->setCurrentIndex(0);
+    }
+
+    onFilterChanged();
+}
+
 void CodeChurnPage::filterByFileAndCommit(const QString& relativePath, const QString& commitOid) {
     exactPathFilter_ = relativePath.trimmed();
     exactCommitFilter_ = commitOid.trimmed();
+    if (!isFileHistoryMode_) {
+        hasMore_ = false;
+    }
 
     if (pathEdit_) {
         QSignalBlocker blocker(pathEdit_);
@@ -193,18 +220,21 @@ QString CodeChurnPage::statusToString(xray::history::ChangeStatus status) {
 }
 
 void CodeChurnPage::onFilterChanged() {
-    std::vector<xray::history::ChangeRecord> filtered = rawChanges_;
+    const QString textQuery = pathEdit_->text().trimmed();
+    if (!exactPathFilter_.isEmpty() && textQuery != exactPathFilter_) {
+        exactPathFilter_.clear();
+        exactCommitFilter_.clear();
+        isFileHistoryMode_ = false;
+        hasMore_ = false;
+    }
+
+    const auto& sourceChanges = (isFileHistoryMode_ && !fileHistoryChanges_.empty()) ? fileHistoryChanges_ : repositoryChanges_;
+    std::vector<xray::history::ChangeRecord> filtered = sourceChanges;
 
     int statusData = statusCombo_->currentData().toInt();
     if (statusData >= 0) {
         auto target = static_cast<xray::history::ChangeStatus>(statusData);
         filtered = xray::history::filterChangesByStatus(filtered, target);
-    }
-
-    const QString textQuery = pathEdit_->text().trimmed();
-    if (!exactPathFilter_.isEmpty() && textQuery != exactPathFilter_) {
-        exactPathFilter_.clear();
-        exactCommitFilter_.clear();
     }
 
     if (!exactPathFilter_.isEmpty()) {
@@ -246,17 +276,21 @@ void CodeChurnPage::onFilterChanged() {
         }
     }
 
+    rawChanges_ = filtered;
     updateKpis(filtered);
     populateTable(filtered);
 }
 
 void CodeChurnPage::onResetFilter() {
+    isFileHistoryMode_ = false;
+    hasMore_ = false;
     exactPathFilter_.clear();
     exactCommitFilter_.clear();
     statusCombo_->setCurrentIndex(0);
     pathEdit_->clear();
-    updateKpis(rawChanges_);
-    populateTable(rawChanges_);
+    rawChanges_ = repositoryChanges_;
+    updateKpis(repositoryChanges_);
+    populateTable(repositoryChanges_);
 }
 
 void CodeChurnPage::updateKpis(const std::vector<xray::history::ChangeRecord>& filtered) {
@@ -282,7 +316,15 @@ void CodeChurnPage::updateKpis(const std::vector<xray::history::ChangeRecord>& f
         .arg(currentChurn_.binaryFilesCount));
     filesCountLabel_->setStyleSheet("color: palette(window-text); font-size: 18px; font-weight: bold;");
 
-    if (currentChurn_.hasUnknownLineCounts) {
+    if (hasMore_) {
+        completenessBadge_->setText(QString::fromUtf8("Часткові дані (обмежено лімітом, є ще зміни)"));
+        const QString bg = dark ? "#d65d0e" : "#af3a03";
+        const QString fg = "#fbf1c7";
+        completenessBadge_->setStyleSheet(
+            QString("background: %1; color: %2; font-weight: bold; border-radius: 8px; padding: 3px 8px; font-size: 11px;")
+                .arg(bg, fg)
+        );
+    } else if (currentChurn_.hasUnknownLineCounts) {
         completenessBadge_->setText(QString::fromUtf8("Є невідомі значення (nullopt)"));
         const QString bg = dark ? "#fabd2f" : "#b57614";
         const QString fg = dark ? "#282828" : "#fbf1c7";
