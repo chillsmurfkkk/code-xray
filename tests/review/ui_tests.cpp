@@ -419,6 +419,8 @@ private slots:
         dummyChange.commitOid = "git_oid_target_222";
         dummyChange.newPath = "src/other.cpp";
         dummyChange.status = xray::history::ChangeStatus::added;
+        dummyChange.addedLines = 10;
+        dummyChange.deletedLines = 0;
         hist.changes.push_back(dummyChange);
 
         emit window.coordinator()->repositoryQueried(hist);
@@ -507,6 +509,33 @@ private slots:
         QCOMPARE(churnTable->rowCount(), 1);
         QCOMPARE(churnTable->item(0, 1)->text(), QString("src/math.cpp"));
         QCOMPARE(churnTable->item(0, 5)->text(), QString("intermediate_commit_150"));
+
+        // Перевірка 1: після «Скинути» відновлюється повна загальна історія репозиторію (всі файли)
+        auto* resetBtn = window.findChild<QPushButton*>("churnResetBtn");
+        QVERIFY(resetBtn != nullptr);
+        resetBtn->click();
+        qApp->processEvents();
+
+        // У загальній історії репозиторію було 2 файли (src/math.cpp та src/other.cpp)
+        QCOMPARE(churnTable->rowCount(), 2);
+        QVERIFY(churnPath->text().isEmpty());
+
+        // Перевірка 2: відображення обмеження історії (hasMore), бейдж показує часткові дані
+        xray::history::HistoryResult partialHist;
+        partialHist.hasMore = true;
+        partialHist.changes = { mathChange };
+        emit window.coordinator()->fileHistoryQueried(QString("src/math.cpp"), QString("intermediate_commit_150"), partialHist);
+        qApp->processEvents();
+
+        auto* completenessBadge = window.findChild<QLabel*>("churnCompletenessBadge");
+        QVERIFY(completenessBadge != nullptr);
+        QVERIFY(completenessBadge->text().contains(QString::fromUtf8("Часткові дані")));
+
+        // Після «Скинути» знову відновлюється повна історія всіх файлів із позначкою «Повний підрахунок»
+        resetBtn->click();
+        qApp->processEvents();
+        QCOMPARE(churnTable->rowCount(), 2);
+        QCOMPARE(completenessBadge->text(), QString::fromUtf8("Повний підрахунок"));
 
         window.close();
     }

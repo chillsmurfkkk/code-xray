@@ -279,8 +279,7 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
 
     connect(coordinator_, &Coordinator::fileHistoryQueried, this, [this](const QString& relativePath, const QString& commitOid, const history::HistoryResult& res) {
         if (codeChurnPage_) {
-            codeChurnPage_->setChanges(res.changes, /*isDemo=*/false);
-            codeChurnPage_->filterByFileAndCommit(relativePath, commitOid);
+            codeChurnPage_->setFileHistory(relativePath, commitOid, res.changes, res.hasMore);
         }
     });
 

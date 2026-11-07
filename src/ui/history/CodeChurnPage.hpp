@@ -18,7 +18,13 @@ public:
     explicit CodeChurnPage(QWidget* parent = nullptr);
 
     void setChanges(const std::vector<xray::history::ChangeRecord>& changes, bool isDemo = true);
+    void setFileHistory(const QString& relativePath, const QString& commitOid,
+                        const std::vector<xray::history::ChangeRecord>& fileChanges,
+                        bool hasMore = false);
     void filterByFileAndCommit(const QString& relativePath, const QString& commitOid = QString());
+    bool isFileHistoryMode() const { return isFileHistoryMode_; }
+    bool hasMore() const { return hasMore_; }
+    const std::vector<xray::history::ChangeRecord>& repositoryChanges() const { return repositoryChanges_; }
     const std::vector<xray::history::ChangeRecord>& changes() const { return rawChanges_; }
     const xray::history::CodeChurn& currentChurn() const { return currentChurn_; }
     bool isDemo() const { return isDemo_; }
@@ -36,9 +42,13 @@ private:
     static QString statusToString(xray::history::ChangeStatus status);
 
     std::vector<xray::history::ChangeRecord> rawChanges_;
+    std::vector<xray::history::ChangeRecord> repositoryChanges_;
+    std::vector<xray::history::ChangeRecord> fileHistoryChanges_;
     std::vector<xray::history::ChangeRecord> displayedChanges_;
     xray::history::CodeChurn currentChurn_;
     bool isDemo_ = true;
+    bool isFileHistoryMode_ = false;
+    bool hasMore_ = false;
     QString exactPathFilter_;
     QString exactCommitFilter_;
 
