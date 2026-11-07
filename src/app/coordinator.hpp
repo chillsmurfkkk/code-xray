@@ -64,6 +64,7 @@ public:
                     analysis::MetricId metricId = analysis::MetricId::function_lines,
                     review::TrendAggregation agg = review::TrendAggregation::function,
                     const std::string& entityKey = {});
+    void queryFileHistory(const std::string& relativePath, const std::string& startOid = {}, std::size_t limit = 100);
 
     void cancel();
     bool isBusy() const { return workerThread_ != nullptr; }
@@ -78,6 +79,7 @@ signals:
     void repositoryOpening();
 
     void repositoryQueried(const xray::history::HistoryResult& result);
+    void fileHistoryQueried(const QString& relativePath, const QString& startOid, const xray::history::HistoryResult& result);
     void commitSnapshotLoaded(std::shared_ptr<const xray::code::ParsedSnapshot> parsedSnapshot);
     void comparisonCompleted(const xray::review::ComparisonReport& report);
     void trendCompleted(const xray::review::TrendReport& report);

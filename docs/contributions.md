@@ -81,7 +81,7 @@
 | A-LIB | 3 | A | Tree-sitter: розбір, обхід, власна структура та діагностика. | [parse.cpp](../src/code/parse.cpp), CTest `parser`. | Реалізовано й перевірено; особиста демонстрація/ретроспектива цим записом не підтверджуються. |
 | B-LIB | 3 | B | JSON-профілі: парсинг, перевірка типів/ключів, серіалізація й запис. | [profiles.cpp](../src/analysis/profiles.cpp), CTest `profiles`. | Реалізовано й перевірено; наявна ретроспектива збережена. |
 | C-LIB | 3 | C | libgit2: відкриття репозиторію, first-parent revwalk, diff дерев (tree_to_tree), виявлення перейменувань, зчитування blob-файлів за деревом коміту, діагностика бінарних/symlink файлів. | [api.cpp](../src/history/api.cpp), [kostukoleksandr.md](retrospectives/kostukoleksandr.md), CTest `git_backend`. | Реалізовано й перевірено; додано ретроспективу. |
-| D-LIB | 3 | D | inja для HTML та nlohmann/json для моделі/JSON-експорту. | [exporter.cpp](../src/review/exporter.cpp), CTest `export`. | Реалізовано й перевірено; особиста демонстрація/ретроспектива цим записом не підтверджуються. |
+| D-LIB | 3 | D | inja для HTML та nlohmann/json для моделі/JSON-експорту. | [exporter.cpp](../src/review/exporter.cpp), [Knuuniacc.md](retrospectives/Knuuniacc.md), CTest `export`. | Реалізовано й перевірено; додано ретроспективу. |
 
 Технічні матеріали B: [профілі](analysis-profiles.md),
 [рушій аналізу](analysis-engine.md). Наявну
@@ -92,8 +92,9 @@
 ЛР2 B: 4 форми, 22 контроли, 4 контейнери та 12 обробників підключено
 до спільного вікна. [Перелік B](contributions/B.md), [перевірка](analysis-ui.md).
 
-
 ЛР2 C: 4 форми, 23 контроли, 4 контейнери та 12 обробників підключено до спільного вікна. [Перелік C](contributions/C.md).
+
+ЛР2 D: 4 форми, 20 власних інтерактивних контролів (та 8 інформаційних написів QLabel і 2 спільних CodeView), 4 контейнери та 12 обробників підключено до спільного вікна. Дія «Історія файла» підключена до Code Churn із точним OID та шляхом. [Перелік D](contributions/D.md).
 
 ЛР2 A: у гілці `a/gui-source-page` на `44f4937` реалізовано чотири сторінки
 коду; особистий перелік містить 23 контроли-кандидати, відповідність поведінки
@@ -103,5 +104,7 @@ Codex завершив діагностику; самостійне авторс
 [Перелік A](contributions/A.md), [поведінка й перевірки](gui-source.md).
 
 ЛР3 C: libgit2-бекенд для читання реальних Git-репозиторіїв, first-parent обхід, ізольована тестова фікстура, ретроспектива [kostukoleksandr.md](retrospectives/kostukoleksandr.md). [api.cpp](../src/history/api.cpp), CTest `git_backend`.
+
+ЛР3 D: inja шаблонізатор для генерації HTML-звітів у стилі Gruvbox, nlohmann/json моделювання, безпечний атомарний запис, ретроспектива [Knuuniacc.md](retrospectives/Knuuniacc.md). [exporter.cpp](../src/review/exporter.cpp), CTest `review`, `review_ui`, `export_tests`.
 
 ЛР4 C: Coordinator — наскрізний ланцюжок Git→A→B→D, фоновий запуск (QThread), прогрес, скасування (std::stop_source), відкидання застарілих результатів (job-generation), first-parent валідація для тренду. Нові UI-контроли CommitsPage (вибір двох комітів, прогрес, скасування). Підключення history::query / loadSnapshot до сторінок Історії через MainWindow. [coordinator.hpp](../src/app/coordinator.hpp), [coordinator.cpp](../src/app/coordinator.cpp), CTest `coordinator`.

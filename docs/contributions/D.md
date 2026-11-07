@@ -154,6 +154,59 @@
 
 `MetricGrowthRule` приховує поріг, локальний `FunctionRef` не виходить із
 `compare()`. Відкриті поля `EntityReview`, `JoinResult` і моделей звіту є фактичним
-дизайном записів даних; цей реєстр не називає їх приватними. ЛР №2, готовність GUI
-та особиста ретроспектива inja не заявляються виконаними. Перевірку first-parent
-ланцюжка має забезпечити координатор C; D не читає Git і сам її не доводить.
+дизайном записів даних; цей реєстр не називає їх приватними. Перевірку first-parent
+ланцюжка комітів забезпечує координатор застосунку; D використовує вхідну послідовність.
+Реалізацію та облік форм і обробників ЛР №2, а також ретроспективу інтеграції шаблонізатора
+Inja для ЛР №3 наведено у наступних розділах.
+
+## ЛР №2 — інтеграція форм D (Огляд коду / Review)
+
+**4 форми, 20 власних інтерактивних елементів керування (контролів), 4 контейнери, 12 обробників**.  
+Для суворого обліку елементи форм розділено за типами: власні інтерактивні елементи керування (кнопки, текстові поля, списки, чекбокс, таблиці, прогрес-бар — рівно 20 згідно з планом ЛР2), інформаційні написи/статуси (`QLabel`), спільні компоненти (`CodeView`) та області попереднього перегляду (`QTextEdit`). Спільна навігація `NavigationPanel` та перемикання тем оформлення окремо до контролів форм не додаються. Недієвий прапорець «Включити фрагменти коду» прибрано з інтерфейсу; дію «Історія файла» підключено до сторінки Code Churn розділу «Історія» з передачею точного шляху й OID та звіркою таблиці результатів.
+
+| Форма в `src/ui/review/` | Власні інтерактивні елементи керування (контроли) | Інформаційні написи (`QLabel`) | Спільні віджети / області виводу | Всього контролів |
+|---|---|---|---|---:|
+| `ComparisonPage` | `comparisonPathFilter` (QLineEdit), `comparisonKindFilter` (QComboBox), `comparisonShowUnknown` (QCheckBox), `comparisonCompareButton` (QPushButton), `comparisonReviewTable` (QTableWidget) | `comparisonDemoBadge`, `comparisonSummaryLabel` | — | 5 |
+| `TrendPage` | `trendMetricCombo` (QComboBox), `trendTargetCombo` (QComboBox), `trendEntityCombo` (QComboBox), `trendBuildButton` (QPushButton), `trendPointsTable` (QTableWidget) | `trendDemoBadge`, `trendStatusLabel` | — | 5 |
+| `ChangeCardPage` | `changeCardMetricsTable` (QTableWidget), `changeCardFindingsList` (QListWidget), `changeCardHistoryBtn` (QPushButton) | `changeCardTitleLabel`, `changeCardExplanationLabel` | `changeCardBeforeCode` (CodeView), `changeCardAfterCode` (CodeView) | 3 |
+| `ExportPage` | `exportFormatCombo` (QComboBox), `exportPathEdit` (QLineEdit), `exportBrowseButton` (QPushButton), `exportPreviewButton` (QPushButton), `exportSaveButton` (QPushButton), `exportCancelButton` (QPushButton), `exportProgressBar` (QProgressBar) | `exportDemoBadge`, `exportStatusLabel` | `exportPreviewArea` (QTextEdit) | 7 |
+| **Разом** | **20 інтерактивних контролів** (рівно за планом ЛР №2) | **8 написів/бейджів** | **2 CodeView + 1 QTextEdit** | **20** |
+
+Контейнери:
+1. `comparisonReviewTable` — таблиця сутностей зіставлення та дельт метрик.
+2. `trendPointsTable` — таблиця точок хронологічної динаміки метрик.
+3. `changeCardCodeSplitter` — розділювач паралельного перегляду коду «до» і «після» у картці зміни.
+4. `exportPreviewArea` — область попереднього перегляду сформованого HTML/JSON звіту.
+
+| Обробник | Подія / призначення |
+|---|---|
+| `ComparisonPage::onCompareRequested` (D-H01) | Запуск обчислення порівняння знімків через Coordinator (або ядро `compare`). |
+| `ComparisonPage::onReviewFilterChanged` (D-H02) | Багатопараметрична фільтрація сутностей за шляхом, типом та повнотою через ядро `filterReviewItems`. |
+| `ComparisonPage::onTableRowSelected` (D-H03) | Відкриття Картки зміни за явною дією користувача (клік або подвійний клік по комірці таблиці `reviewTable_`); виділення рядка клавіатурою перегляд не перериває. |
+| `TrendPage::onTrendMetricChanged` (D-H04) | Зміна метрики для аналізу динаміки. |
+| `TrendPage::onTrendTargetChanged` (D-H05) | Перемикання агрегації (функція / файл) та оновлення списку сутностей. |
+| `TrendPage::onTrendRequested` (D-H06) | Побудова серії точок тренду за ланцюжком аналізів через Coordinator або `buildTrend`. |
+| `ChangeCardPage::onMetricRowSelected` (D-H07) | Вибір метрики сутності та відображення точних числових значень у поясненні. |
+| `ChangeCardPage::onRelatedFindingSelected` (D-H08) | Вибір порушення та показ деталей стану правила аналізу. |
+| `ChangeCardPage::onFileHistoryRequested` (D-H09) | Перехід до історії файла: визначення точного OID за `sourceId` посилання (зокрема для unmatched сутностей із базового або цільового знімка), запит історії файла через `Coordinator::queryFileHistory` від переданого OID та показ змін у Code Churn без штучного обмеження одним комітом. |
+| `ExportPage::onExportFormatChanged` (D-H10) | Вибір формату експорту (HTML / JSON) та узгодження розширення файлу. |
+| `ExportPage::onPreviewRequested` (D-H11) | Асинхронне формування попереднього перегляду звіту в окремому `QThread` із спільним рендерингом. |
+| `ExportPage::onExportRequested` (D-H12) | Асинхронний атомарний експорт звіту через `exportReport` із прогресом, підтримкою скасування та захистом збереженого файлу. |
+| `MainWindow::pageSelected (section=review)` | Маршрутизація сторінок розділу Огляд (Порівняння, Динаміка, Картка зміни, Експорт) через `QStackedWidget`. |
+
+Перевірка: автоматичні тести `review_ui_tests` (8 сценаріїв, 100% Passed) перевіряють роботу всіх 4 форм, фільтрацію, завантаження реальних даних, асинхронні операції, відкриття за явною дією, вибір OID для unmatched за `sourceId` та відображення змін із проміжних комітів у Code Churn.
+
+## ЛР №3 — inja шаблонізатор та безпечний експорт звітів
+
+**Файли:** [`src/review/exporter.cpp`](../../src/review/exporter.cpp), [`src/review/exporter.hpp`](../../src/review/exporter.hpp), [`src/ui/review/ExportPage.cpp`](../../src/ui/review/ExportPage.cpp)  
+**Ретроспектива та джерела:** [`docs/retrospectives/Knuuniacc.md`](../retrospectives/Knuuniacc.md)  
+**Тестові цілі:** `export_tests` (7 сценаріїв, 100% Passed), `review_ui_tests` (асинхронне прев'ю, експорт, пізнє скасування)
+
+### Реалізовані можливості та архітектура
+- **Шаблонізація Inja**: використання сучасного C++20 Jinja2-подібного рушія для формування HTML-звітів у стилі Gruvbox із таблицями змін, бейджами повноти та метаданими знімків коду.
+- **Моделювання даних у JSON**: трансформація типізованих структур `ComparisonReport` у проміжну модель даних `ReportModel` за допомогою `nlohmann/json`.
+- **Санітизація та захист (`escapeHtmlText`)**: екранування символів `<, >, &, ", '` у підписах функцій C++ для запобігання XSS та пошкодженню структури HTML.
+- **Атомарний запис (`writeReportSafely`)**: збереження у тимчасовий файл `.tmp.<pid>.<rnd>`. При заміні існуючого файлу операція складається з двох послідовних перейменувань: переміщення оригіналу в резервну копію `.bak` (між ними цільовий файл тимчасово відсутній на файловій системі) та встановлення нового файлу на цільове місце; при збої чи скасуванні резервна копія повертається назад, а при успіху — видаляється.
+- **Єдиний конвеєр серіалізації**: спільна функція `renderReport()` забезпечує повну тотожність між вмістом вікна попереднього перегляду та збереженим файлом.
+- **Кооперативне скасування та збереження результату**: інтеграція `std::stop_token` (F11/T12) із захистом від приховування успіху операції після завершення запису на диск.
+

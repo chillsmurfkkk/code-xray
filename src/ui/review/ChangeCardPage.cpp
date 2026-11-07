@@ -47,6 +47,7 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     mainLayout->setSpacing(12);
 
     titleLabel_ = new QLabel(QString::fromUtf8("Картка зміни"));
+    titleLabel_->setObjectName("changeCardTitleLabel");
     auto titleFont = titleLabel_->font();
     titleFont.setPointSize(titleFont.pointSize() + 4);
     titleFont.setBold(true);
@@ -54,17 +55,20 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     mainLayout->addWidget(titleLabel_);
 
     explanationLabel_ = new QLabel;
+    explanationLabel_->setObjectName("changeCardExplanationLabel");
     explanationLabel_->setWordWrap(true);
     mainLayout->addWidget(explanationLabel_);
 
     // --- Код до/після (splitter) ---
     auto* codeSplitter = new QSplitter(Qt::Horizontal);
+    codeSplitter->setObjectName("changeCardCodeSplitter");
     codeSplitter->setHandleWidth(6);
     codeSplitter->setChildrenCollapsible(false);
 
     auto* beforeBox = new QVBoxLayout;
     beforeBox->addWidget(new QLabel(QString::fromUtf8("Код «до»")));
     beforeCodeView_ = new xray::ui::CodeView(this);
+    beforeCodeView_->setObjectName("changeCardBeforeCode");
     auto* beforeWidget = new QWidget;
     beforeBox->addWidget(beforeCodeView_);
     beforeWidget->setLayout(beforeBox);
@@ -72,6 +76,7 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     auto* afterBox = new QVBoxLayout;
     afterBox->addWidget(new QLabel(QString::fromUtf8("Код «після»")));
     afterCodeView_ = new xray::ui::CodeView(this);
+    afterCodeView_->setObjectName("changeCardAfterCode");
     auto* afterWidget = new QWidget;
     afterBox->addWidget(afterCodeView_);
     afterWidget->setLayout(afterBox);
@@ -85,6 +90,7 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
 
     // Таблиця метрик
     metricsTable_ = new QTableWidget;
+    metricsTable_->setObjectName("changeCardMetricsTable");
     metricsTable_->setColumnCount(4);
     metricsTable_->setHorizontalHeaderLabels({
         QString::fromUtf8("Метрика"),
@@ -101,12 +107,15 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
     auto* findingsLayout = new QVBoxLayout;
     findingsLayout->addWidget(new QLabel(QString::fromUtf8("Порушення")));
     findingsList_ = new QListWidget;
+    findingsList_->setObjectName("changeCardFindingsList");
     connect(findingsList_, &QListWidget::currentRowChanged, this, &ChangeCardPage::onRelatedFindingSelected);
     findingsLayout->addWidget(findingsList_);
 
     historyButton_ = new QPushButton(QString::fromUtf8("Історія файла"));
+    historyButton_->setObjectName("changeCardHistoryBtn");
     historyButton_->setMinimumHeight(32);
     historyButton_->setProperty("role", "primaryAction");
+    historyButton_->setEnabled(false);
     connect(historyButton_, &QPushButton::clicked, this, &ChangeCardPage::onFileHistoryRequested);
     findingsLayout->addWidget(historyButton_);
 
@@ -120,6 +129,8 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
 void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& report)
 {
     currentItem_ = item;
+    currentPath_.clear();
+    currentCommitOid_.clear();
 
     const bool isDemo = (report.analysisFingerprint == "fp-demo-v1" || report.baseId == "analysis-base-001");
     if (isDemo) {
@@ -132,6 +143,25 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
     // Обов'язково очищаємо обидві панелі коду перед встановленням нового
     beforeCodeView_->setSourceText("");
     afterCodeView_->setSourceText("");
+
+    // Отримуємо OID коміту за sourceId фактичного посилання на код
+    auto getOidForSourceId = [&](const std::string& sourceId) -> QString {
+        if (report.target && report.target->parsed && report.target->parsed->source &&
+            report.target->parsed->source->id == sourceId) {
+            if (report.target->parsed->source->commitOid) {
+                return QString::fromStdString(*report.target->parsed->source->commitOid);
+            }
+            return QString::fromStdString(report.targetId);
+        }
+        if (report.base && report.base->parsed && report.base->parsed->source &&
+            report.base->parsed->source->id == sourceId) {
+            if (report.base->parsed->source->commitOid) {
+                return QString::fromStdString(*report.base->parsed->source->commitOid);
+            }
+            return QString::fromStdString(report.baseId);
+        }
+        return QString();
+    };
 
     // --- Код до/після з урахуванням шляху файла ---
     auto extractCode = [&](const std::string& sourceId, const std::string& relativePath, const code::SourceRange& range) -> QString {
@@ -180,19 +210,22 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
             const auto& ref = item.sourceRefs.front();
             afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
             currentPath_ = QString::fromStdString(ref.relativePath);
+            currentCommitOid_ = getOidForSourceId(ref.sourceId);
         }
     } else if (item.kind == ReviewKind::removed) {
         if (!item.sourceRefs.empty()) {
             const auto& ref = item.sourceRefs.front();
             beforeCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
             currentPath_ = QString::fromStdString(ref.relativePath);
+            currentCommitOid_ = getOidForSourceId(ref.sourceId);
         }
         afterCodeView_->setSourceText(QString::fromUtf8("// (функцію видалено у версії «після»)\n"));
     } else if (item.kind == ReviewKind::unmatched) {
-        // [P2] unmatched: якщо посилання на target, то показуємо в «після», а зліва — заглушку
+        // [P2] unmatched: OID вибирається за sourceId фактичного посилання на код (базовий або цільовий)
         if (!item.sourceRefs.empty()) {
             const auto& ref = item.sourceRefs.front();
             currentPath_ = QString::fromStdString(ref.relativePath);
+            currentCommitOid_ = getOidForSourceId(ref.sourceId);
             if (isTargetSource(ref.sourceId)) {
                 beforeCodeView_->setSourceText(QString::fromUtf8("// (незіставлено: сутність присутня лише у версії «після»)\n"));
                 afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
@@ -214,10 +247,13 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
             }
             beforeCodeView_->setSourceText(extractCode(baseRef->sourceId, baseRef->relativePath, baseRef->range));
             afterCodeView_->setSourceText(extractCode(targetRef->sourceId, targetRef->relativePath, targetRef->range));
-            currentPath_ = QString::fromStdString(targetRef->relativePath.empty() ? baseRef->relativePath : targetRef->relativePath);
+            const auto& chosenRef = targetRef->relativePath.empty() ? *baseRef : *targetRef;
+            currentPath_ = QString::fromStdString(chosenRef.relativePath);
+            currentCommitOid_ = getOidForSourceId(chosenRef.sourceId);
         } else if (!item.sourceRefs.empty()) {
             const auto& ref = item.sourceRefs.front();
             currentPath_ = QString::fromStdString(ref.relativePath);
+            currentCommitOid_ = getOidForSourceId(ref.sourceId);
             if (isTargetSource(ref.sourceId)) {
                 beforeCodeView_->setSourceText(QString::fromUtf8("// (версія «до» недоступна)\n"));
                 afterCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
@@ -225,6 +261,18 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
                 beforeCodeView_->setSourceText(extractCode(ref.sourceId, ref.relativePath, ref.range));
                 afterCodeView_->setSourceText(QString::fromUtf8("// (версія «після» недоступна)\n"));
             }
+        }
+    }
+
+    if (currentCommitOid_.isEmpty()) {
+        if (report.target && report.target->parsed && report.target->parsed->source && report.target->parsed->source->commitOid) {
+            currentCommitOid_ = QString::fromStdString(*report.target->parsed->source->commitOid);
+        } else if (report.base && report.base->parsed && report.base->parsed->source && report.base->parsed->source->commitOid) {
+            currentCommitOid_ = QString::fromStdString(*report.base->parsed->source->commitOid);
+        } else if (!report.targetId.empty()) {
+            currentCommitOid_ = QString::fromStdString(report.targetId);
+        } else if (!report.baseId.empty()) {
+            currentCommitOid_ = QString::fromStdString(report.baseId);
         }
     }
 
@@ -250,6 +298,10 @@ void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& re
     }
     if (item.findings.empty()) {
         findingsList_->addItem(QString::fromUtf8("(немає порушень)"));
+    }
+
+    if (historyButton_) {
+        historyButton_->setEnabled(!currentPath_.isEmpty());
     }
 }
 
@@ -278,7 +330,7 @@ void ChangeCardPage::onRelatedFindingSelected(int row)
 void ChangeCardPage::onFileHistoryRequested()
 {
     if (currentPath_.isEmpty()) return;
-    emit fileHistoryRequested(currentPath_, QString());
+    emit fileHistoryRequested(currentPath_, currentCommitOid_);
 }
 
 } // namespace xray::ui::review

@@ -98,7 +98,9 @@ ComparisonPage::ComparisonPage(QWidget* parent)
             this, &ComparisonPage::onReviewFilterChanged);
     connect(showUnknownCheck_, &QCheckBox::checkStateChanged, this, &ComparisonPage::onReviewFilterChanged);
     connect(compareButton_, &QPushButton::clicked, this, &ComparisonPage::onCompareRequested);
+    // D-H03: Відкриття картки за явною дією користувача (клік або подвійний клік по комірці таблиці)
     connect(reviewTable_, &QTableWidget::cellClicked, this, &ComparisonPage::onTableRowSelected);
+    connect(reviewTable_, &QTableWidget::cellDoubleClicked, this, &ComparisonPage::onTableRowSelected);
 
     // Завантажити демо-дані
     setReport(makeDemoComparisonReport(), /*isDemo=*/true);

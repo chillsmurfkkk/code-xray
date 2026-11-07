@@ -2,6 +2,7 @@
 #include "ui/history/history_fixtures.hpp"
 #include "ui/review/review_table_delegate.hpp"
 
+#include <filesystem>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -164,6 +165,22 @@ void CodeChurnPage::setChanges(const std::vector<xray::history::ChangeRecord>& c
     onResetFilter();
 }
 
+void CodeChurnPage::filterByFileAndCommit(const QString& relativePath, const QString& commitOid) {
+    exactPathFilter_ = relativePath.trimmed();
+    exactCommitFilter_ = commitOid.trimmed();
+
+    if (pathEdit_) {
+        QSignalBlocker blocker(pathEdit_);
+        pathEdit_->setText(relativePath);
+    }
+    if (statusCombo_) {
+        QSignalBlocker blocker(statusCombo_);
+        statusCombo_->setCurrentIndex(0);
+    }
+
+    onFilterChanged();
+}
+
 QString CodeChurnPage::statusToString(xray::history::ChangeStatus status) {
     switch (status) {
     case xray::history::ChangeStatus::added: return QString::fromUtf8("Додано");
@@ -184,22 +201,49 @@ void CodeChurnPage::onFilterChanged() {
         filtered = xray::history::filterChangesByStatus(filtered, target);
     }
 
-    QString pathQuery = pathEdit_->text().trimmed().toLower();
-    if (!pathQuery.isEmpty()) {
-        std::vector<xray::history::ChangeRecord> pathMatches;
+    const QString textQuery = pathEdit_->text().trimmed();
+    if (!exactPathFilter_.isEmpty() && textQuery != exactPathFilter_) {
+        exactPathFilter_.clear();
+        exactCommitFilter_.clear();
+    }
+
+    if (!exactPathFilter_.isEmpty()) {
+        const auto normQuery = std::filesystem::path(exactPathFilter_.toStdString()).lexically_normal().generic_string();
+        std::vector<xray::history::ChangeRecord> exactMatches;
         for (const auto& ch : filtered) {
-            bool matches = false;
-            if (ch.newPath.has_value() && QString::fromStdString(*ch.newPath).toLower().contains(pathQuery)) {
-                matches = true;
+            bool matchesPath = false;
+            if (ch.newPath.has_value()) {
+                auto p = std::filesystem::path(*ch.newPath).lexically_normal().generic_string();
+                if (p == normQuery) matchesPath = true;
             }
-            if (ch.oldPath.has_value() && QString::fromStdString(*ch.oldPath).toLower().contains(pathQuery)) {
-                matches = true;
+            if (!matchesPath && ch.oldPath.has_value()) {
+                auto p = std::filesystem::path(*ch.oldPath).lexically_normal().generic_string();
+                if (p == normQuery) matchesPath = true;
             }
-            if (matches) {
-                pathMatches.push_back(ch);
+
+            if (matchesPath) {
+                exactMatches.push_back(ch);
             }
         }
-        filtered = std::move(pathMatches);
+        filtered = std::move(exactMatches);
+    } else {
+        QString pathQuery = textQuery.toLower();
+        if (!pathQuery.isEmpty()) {
+            std::vector<xray::history::ChangeRecord> pathMatches;
+            for (const auto& ch : filtered) {
+                bool matches = false;
+                if (ch.newPath.has_value() && QString::fromStdString(*ch.newPath).toLower().contains(pathQuery)) {
+                    matches = true;
+                }
+                if (ch.oldPath.has_value() && QString::fromStdString(*ch.oldPath).toLower().contains(pathQuery)) {
+                    matches = true;
+                }
+                if (matches) {
+                    pathMatches.push_back(ch);
+                }
+            }
+            filtered = std::move(pathMatches);
+        }
     }
 
     updateKpis(filtered);
@@ -207,6 +251,8 @@ void CodeChurnPage::onFilterChanged() {
 }
 
 void CodeChurnPage::onResetFilter() {
+    exactPathFilter_.clear();
+    exactCommitFilter_.clear();
     statusCombo_->setCurrentIndex(0);
     pathEdit_->clear();
     updateKpis(rawChanges_);

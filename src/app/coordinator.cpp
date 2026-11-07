@@ -308,6 +308,71 @@ void Coordinator::openRepository(const std::filesystem::path& repoPath) {
     thread->start();
 }
 
+void Coordinator::queryFileHistory(const std::string& relativePath, const std::string& startOid, std::size_t limit) {
+    if (repoPath_.empty()) {
+        emit operationFailed(QString::fromUtf8("Історія файла"), QString::fromUtf8("Репозиторій не вибрано"));
+        return;
+    }
+
+    const auto jobId = ++currentJobId_;
+    std::stop_source stopSource;
+    const auto token = stopSource.get_token();
+
+    emit statusMessage(QString::fromUtf8("Завантажуємо історію файла %1…").arg(QString::fromStdString(relativePath)));
+
+    const auto repoPath = repoPath_;
+    auto thread = QThread::create([this, repoPath, relativePath, startOid, limit, jobId, token]() {
+        using QueryRes = Result<history::HistoryResult>;
+        auto result = std::make_shared<QueryRes>(Cancelled{});
+
+        try {
+            JobContext ctx;
+            ctx.jobId = jobId;
+            ctx.stopToken = token;
+            ctx.onProgress = [this, jobId](const Progress& p) {
+                QMetaObject::invokeMethod(this, [this, jobId, p] {
+                    if (jobId == currentJobId_ && !currentStopSource_.stop_requested()) {
+                        emit progressChanged(p);
+                    }
+                }, Qt::QueuedConnection);
+            };
+
+            history::RepositorySpec spec{repoPath};
+            history::HistoryRequest req;
+            req.startOid = startOid;
+            req.relativePath = relativePath;
+            req.limit = limit;
+
+            *result = history::query(spec, req, ctx);
+        } catch (const std::exception& e) {
+            *result = Error{ErrorCode::read_error, e.what()};
+        } catch (...) {
+            *result = Error{ErrorCode::read_error, "Невідома помилка читання історії файла"};
+        }
+
+        QMetaObject::invokeMethod(this, [this, jobId, relativePath, startOid, result]() {
+            if (jobId != currentJobId_) {
+                return;
+            }
+            if (currentStopSource_.stop_requested() || std::holds_alternative<Cancelled>(*result)) {
+                emit operationCancelled(QString::fromUtf8("Історія файла"));
+                return;
+            }
+            if (std::holds_alternative<Error>(*result)) {
+                const auto& err = std::get<Error>(*result);
+                emit operationFailed(QString::fromUtf8("Історія файла"), QString::fromStdString(err.message));
+            } else if (auto* histRes = std::get_if<history::HistoryResult>(result.get())) {
+                emit fileHistoryQueried(QString::fromStdString(relativePath), QString::fromStdString(startOid), *histRes);
+                emit statusMessage(QString::fromUtf8("Історію файла оновлено: знайдено %1 змін").arg(histRes->changes.size()), 5000);
+            }
+        }, Qt::QueuedConnection);
+    });
+
+    thread->setParent(this);
+    setWorker(thread, std::move(stopSource), jobId);
+    thread->start();
+}
+
 void Coordinator::loadCommitSnapshot(const std::string& oid) {
     if (repoPath_.empty()) {
         emit operationFailed(QString::fromUtf8("Завантаження знімку"), QString::fromUtf8("Репозиторій не вибрано"));
