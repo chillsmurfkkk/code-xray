@@ -24,6 +24,11 @@ public:
     void filterByFileAndCommit(const QString& relativePath, const QString& commitOid = QString());
     bool isFileHistoryMode() const { return isFileHistoryMode_; }
     bool hasMore() const { return hasMore_; }
+    bool userFilterModified() const { return userFilterModified_; }
+    QString exactPathFilter() const { return exactPathFilter_; }
+    QString exactCommitFilter() const { return exactCommitFilter_; }
+    QString pathFilterText() const;
+    bool canAcceptFileHistory(const QString& relativePath, const QString& commitOid) const;
     const std::vector<xray::history::ChangeRecord>& repositoryChanges() const { return repositoryChanges_; }
     const std::vector<xray::history::ChangeRecord>& changes() const { return rawChanges_; }
     const xray::history::CodeChurn& currentChurn() const { return currentChurn_; }
@@ -35,6 +40,7 @@ protected:
 private slots:
     void onFilterChanged();
     void onResetFilter();
+    void onResetButtonClicked();
 
 private:
     void updateKpis(const std::vector<xray::history::ChangeRecord>& filtered);
@@ -49,6 +55,7 @@ private:
     bool isDemo_ = true;
     bool isFileHistoryMode_ = false;
     bool hasMore_ = false;
+    bool userFilterModified_ = false;
     QString exactPathFilter_;
     QString exactCommitFilter_;
 
