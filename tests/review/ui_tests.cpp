@@ -520,7 +520,37 @@ private slots:
         QCOMPARE(churnTable->rowCount(), 2);
         QVERIFY(churnPath->text().isEmpty());
 
-        // Перевірка 2: відображення обмеження історії (hasMore), бейдж показує часткові дані
+        // Перевірка 2: запізнілий результат запиту після «Скинути» відкидається і не перезаписує вибір користувача
+        xray::history::HistoryResult lateHist;
+        lateHist.changes = { mathChange };
+        emit window.coordinator()->fileHistoryQueried(QString("src/math.cpp"), QString("intermediate_commit_150"), lateHist);
+        qApp->processEvents();
+
+        // Результат відкинуто: фільтр не увімкнувся назад, у таблиці залишаються всі 2 файли, а поле шляху порожнє
+        QCOMPARE(churnTable->rowCount(), 2);
+        QVERIFY(churnPath->text().isEmpty());
+
+        // Перевірка 3: зміна фільтра користувачем (ввід у поле пошуку) також призводить до відкидання пізнього результату
+        churnPath->setText("src/other");
+        emit window.coordinator()->fileHistoryQueried(QString("src/math.cpp"), QString("intermediate_commit_150"), lateHist);
+        qApp->processEvents();
+        QCOMPARE(churnPath->text(), QString("src/other")); // вибір користувача не перезаписано
+
+        // Скидаємо фільтр знову
+        resetBtn->click();
+        qApp->processEvents();
+        QCOMPARE(churnTable->rowCount(), 2);
+
+        // Перевірка 4: якщо запит повернув порожню історію, сторінка показує порожній список (0 рядків), а не підставляє загальний список репозиторію
+        churnPage->filterByFileAndCommit(QString("src/math.cpp"), QString("intermediate_commit_150"));
+        xray::history::HistoryResult emptyHist;
+        emptyHist.changes = {};
+        emit window.coordinator()->fileHistoryQueried(QString("src/math.cpp"), QString("intermediate_commit_150"), emptyHist);
+        qApp->processEvents();
+        QCOMPARE(churnTable->rowCount(), 0);
+
+        // Перевірка 5: відображення обмеження історії (hasMore), бейдж показує часткові дані
+        churnPage->filterByFileAndCommit(QString("src/math.cpp"), QString("intermediate_commit_150"));
         xray::history::HistoryResult partialHist;
         partialHist.hasMore = true;
         partialHist.changes = { mathChange };
@@ -530,6 +560,7 @@ private slots:
         auto* completenessBadge = window.findChild<QLabel*>("churnCompletenessBadge");
         QVERIFY(completenessBadge != nullptr);
         QVERIFY(completenessBadge->text().contains(QString::fromUtf8("Часткові дані")));
+        QCOMPARE(churnTable->rowCount(), 1);
 
         // Після «Скинути» знову відновлюється повна історія всіх файлів із позначкою «Повний підрахунок»
         resetBtn->click();

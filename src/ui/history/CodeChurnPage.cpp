@@ -141,11 +141,37 @@ CodeChurnPage::CodeChurnPage(QWidget* parent)
     mainLayout->addWidget(changesTable_, 1);
 
     connect(statusCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CodeChurnPage::onFilterChanged);
+    connect(statusCombo_, QOverload<int>::of(&QComboBox::activated), this, [this](int) {
+        userFilterModified_ = true;
+    });
     connect(pathEdit_, &QLineEdit::textChanged, this, &CodeChurnPage::onFilterChanged);
+    connect(pathEdit_, &QLineEdit::textEdited, this, [this](const QString&) {
+        userFilterModified_ = true;
+    });
     connect(recomputeBtn_, &QPushButton::clicked, this, &CodeChurnPage::onFilterChanged);
-    connect(resetBtn_, &QPushButton::clicked, this, &CodeChurnPage::onResetFilter);
+    connect(resetBtn_, &QPushButton::clicked, this, &CodeChurnPage::onResetButtonClicked);
 
     setChanges(makeDemoChanges(), true);
+}
+
+QString CodeChurnPage::pathFilterText() const {
+    return pathEdit_ ? pathEdit_->text().trimmed() : QString();
+}
+
+bool CodeChurnPage::canAcceptFileHistory(const QString& relativePath, const QString& commitOid) const {
+    if (userFilterModified_) {
+        return false;
+    }
+    if (exactPathFilter_.isEmpty() || exactPathFilter_.trimmed() != relativePath.trimmed()) {
+        return false;
+    }
+    if (!exactCommitFilter_.isEmpty() && exactCommitFilter_.trimmed() != commitOid.trimmed()) {
+        return false;
+    }
+    if (pathEdit_ && pathEdit_->text().trimmed() != relativePath.trimmed()) {
+        return false;
+    }
+    return true;
 }
 
 void CodeChurnPage::changeEvent(QEvent* event) {
@@ -159,18 +185,25 @@ void CodeChurnPage::changeEvent(QEvent* event) {
 void CodeChurnPage::setChanges(const std::vector<xray::history::ChangeRecord>& changes, bool isDemo) {
     repositoryChanges_ = changes;
     rawChanges_ = changes;
+    fileHistoryChanges_.clear();
     isFileHistoryMode_ = false;
     hasMore_ = false;
+    userFilterModified_ = false;
     isDemo_ = isDemo;
     if (demoBadge_) {
         demoBadge_->setVisible(isDemo_);
     }
     onResetFilter();
+    userFilterModified_ = false;
 }
 
 void CodeChurnPage::setFileHistory(const QString& relativePath, const QString& commitOid,
                                    const std::vector<xray::history::ChangeRecord>& fileChanges,
                                    bool hasMore) {
+    if (!canAcceptFileHistory(relativePath, commitOid)) {
+        return;
+    }
+
     fileHistoryChanges_ = fileChanges;
     isFileHistoryMode_ = true;
     hasMore_ = hasMore;
@@ -181,10 +214,6 @@ void CodeChurnPage::setFileHistory(const QString& relativePath, const QString& c
         QSignalBlocker blocker(pathEdit_);
         pathEdit_->setText(relativePath);
     }
-    if (statusCombo_) {
-        QSignalBlocker blocker(statusCombo_);
-        statusCombo_->setCurrentIndex(0);
-    }
 
     onFilterChanged();
 }
@@ -192,9 +221,9 @@ void CodeChurnPage::setFileHistory(const QString& relativePath, const QString& c
 void CodeChurnPage::filterByFileAndCommit(const QString& relativePath, const QString& commitOid) {
     exactPathFilter_ = relativePath.trimmed();
     exactCommitFilter_ = commitOid.trimmed();
-    if (!isFileHistoryMode_) {
-        hasMore_ = false;
-    }
+    userFilterModified_ = false;
+    isFileHistoryMode_ = false;
+    hasMore_ = false;
 
     if (pathEdit_) {
         QSignalBlocker blocker(pathEdit_);
@@ -226,9 +255,10 @@ void CodeChurnPage::onFilterChanged() {
         exactCommitFilter_.clear();
         isFileHistoryMode_ = false;
         hasMore_ = false;
+        userFilterModified_ = true;
     }
 
-    const auto& sourceChanges = (isFileHistoryMode_ && !fileHistoryChanges_.empty()) ? fileHistoryChanges_ : repositoryChanges_;
+    const auto& sourceChanges = isFileHistoryMode_ ? fileHistoryChanges_ : repositoryChanges_;
     std::vector<xray::history::ChangeRecord> filtered = sourceChanges;
 
     int statusData = statusCombo_->currentData().toInt();
@@ -281,11 +311,17 @@ void CodeChurnPage::onFilterChanged() {
     populateTable(filtered);
 }
 
+void CodeChurnPage::onResetButtonClicked() {
+    userFilterModified_ = true;
+    onResetFilter();
+}
+
 void CodeChurnPage::onResetFilter() {
     isFileHistoryMode_ = false;
     hasMore_ = false;
     exactPathFilter_.clear();
     exactCommitFilter_.clear();
+    fileHistoryChanges_.clear();
     statusCombo_->setCurrentIndex(0);
     pathEdit_->clear();
     rawChanges_ = repositoryChanges_;

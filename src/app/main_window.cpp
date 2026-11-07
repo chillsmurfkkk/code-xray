@@ -278,9 +278,14 @@ MainWindow::MainWindow(ui::Theme theme, QWidget* parent)
     });
 
     connect(coordinator_, &Coordinator::fileHistoryQueried, this, [this](const QString& relativePath, const QString& commitOid, const history::HistoryResult& res) {
-        if (codeChurnPage_) {
-            codeChurnPage_->setFileHistory(relativePath, commitOid, res.changes, res.hasMore);
+        if (!codeChurnPage_) {
+            return;
         }
+        // Відкидаємо запізнілий результат після скидання або зміни фільтра
+        if (!codeChurnPage_->canAcceptFileHistory(relativePath, commitOid)) {
+            return;
+        }
+        codeChurnPage_->setFileHistory(relativePath, commitOid, res.changes, res.hasMore);
     });
 
     connect(coordinator_, &Coordinator::commitSnapshotLoaded, this, [this, navigation](auto snapshot) {
