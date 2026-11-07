@@ -129,6 +129,25 @@ ChangeCardPage::ChangeCardPage(QWidget* parent) : QWidget(parent)
 void ChangeCardPage::showItem(const ReviewItem& item, const ComparisonReport& report)
 {
     currentItem_ = item;
+    currentPath_.clear();
+    currentCommitOid_.clear();
+
+    // Визначаємо точний commitOid для цієї сутності (з цільового знімка або базового для видалених)
+    if (item.kind == ReviewKind::removed) {
+        if (report.base && report.base->parsed && report.base->parsed->source && report.base->parsed->source->commitOid) {
+            currentCommitOid_ = QString::fromStdString(*report.base->parsed->source->commitOid);
+        } else if (!report.baseId.empty()) {
+            currentCommitOid_ = QString::fromStdString(report.baseId);
+        }
+    } else {
+        if (report.target && report.target->parsed && report.target->parsed->source && report.target->parsed->source->commitOid) {
+            currentCommitOid_ = QString::fromStdString(*report.target->parsed->source->commitOid);
+        } else if (report.base && report.base->parsed && report.base->parsed->source && report.base->parsed->source->commitOid) {
+            currentCommitOid_ = QString::fromStdString(*report.base->parsed->source->commitOid);
+        } else if (!report.targetId.empty()) {
+            currentCommitOid_ = QString::fromStdString(report.targetId);
+        }
+    }
 
     const bool isDemo = (report.analysisFingerprint == "fp-demo-v1" || report.baseId == "analysis-base-001");
     if (isDemo) {
@@ -291,7 +310,7 @@ void ChangeCardPage::onRelatedFindingSelected(int row)
 void ChangeCardPage::onFileHistoryRequested()
 {
     if (currentPath_.isEmpty()) return;
-    emit fileHistoryRequested(currentPath_, QString());
+    emit fileHistoryRequested(currentPath_, currentCommitOid_);
 }
 
 } // namespace xray::ui::review

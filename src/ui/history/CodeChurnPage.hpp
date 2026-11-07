@@ -18,6 +18,7 @@ public:
     explicit CodeChurnPage(QWidget* parent = nullptr);
 
     void setChanges(const std::vector<xray::history::ChangeRecord>& changes, bool isDemo = true);
+    void filterByFileAndCommit(const QString& relativePath, const QString& commitOid = QString());
     const std::vector<xray::history::ChangeRecord>& changes() const { return rawChanges_; }
     const xray::history::CodeChurn& currentChurn() const { return currentChurn_; }
     bool isDemo() const { return isDemo_; }
@@ -38,6 +39,8 @@ private:
     std::vector<xray::history::ChangeRecord> displayedChanges_;
     xray::history::CodeChurn currentChurn_;
     bool isDemo_ = true;
+    QString exactPathFilter_;
+    QString exactCommitFilter_;
 
     QLabel* demoBadge_ = nullptr;
     QLabel* addedLinesLabel_ = nullptr;
